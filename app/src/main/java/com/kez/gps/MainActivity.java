@@ -106,6 +106,9 @@ public class MainActivity extends AppCompatActivity {
         // Настрой карта
         setupMap();
 
+        // Hint цвят на полето
+        itnInput.setHintTextColor(Color.parseColor("#888888"));
+
         // Бутони
         findViewById(R.id.search_btn).setOnClickListener(v -> search());
         findViewById(R.id.mic_btn).setOnClickListener(v -> startVoice());
