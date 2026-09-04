@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>КЕЦ Карлово GPS</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { height: 100vh; display: flex; flex-direction: column; font-family: Arial, sans-serif; background: #1a1a2e; color: #eee; }
+#header { background: #16213e; padding: 10px 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border-bottom: 2px solid #0f3460; }
+#header h1 { font-size: 15px; color: #e94560; white-space: nowrap; }
+#itn-input { flex: 1; min-width: 200px; padding: 7px 11px; border-radius: 6px; border: 1px solid #0f3460; background: #0f3460; color: #fff; font-size: 13px; height: 36px; }
+#btn { padding: 7px 16px; background: #e94560; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.mtoggle { display: flex; border-radius: 6px; overflow: hidden; border: 1px solid #0f3460; }
+.mtoggle button { padding: 6px 10px; background: #0f3460; color: #aaa; border: none; cursor: pointer; font-size: 12px; }
+.mtoggle button.active { background: #e94560; color: white; }
+#load-btn { padding: 6px 12px; background: #0f3460; color: #4CAF50; border: 1px solid #4CAF50; border-radius: 6px; cursor: pointer; font-size: 12px; white-space: nowrap; }
+#file-input { display: none; }
+#status { font-size: 12px; color: #aaa; }
+#map { flex: 1; }
+#panel { display: none; position: absolute; right: 10px; top: 68px; z-index: 1000; background: #16213e; border: 1px solid #0f3460; border-radius: 8px; padding: 10px; max-height: 78vh; overflow-y: auto; width: 290px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+#ph { display: flex; justify-content: space-between; margin-bottom: 8px; }
+#ph h3 { color: #e94560; font-size: 13px; }
+#pc { cursor: pointer; color: #aaa; }
+.ri { padding: 6px 7px; border-bottom: 1px solid #0f3460; font-size: 11px; border-radius: 3px; }
+.ri:hover { background: #0a1628; }
+.ri .n { font-weight: bold; font-size: 12px; }
+.ri .c { color: #fff; margin-top: 1px; }
+.ri .p { color: #999; font-size: 10px; }
+.ri .x { color: #aaa; font-size: 10px; padding: 2px 5px; background: #0f3460; border-radius: 3px; border: none; cursor: pointer; float: right; margin-left: 6px; }
+.dc { display: none; margin-top: 6px; background: #0a1628; border-radius: 4px; padding: 6px; }
+.dc.open { display: block; }
+.dr { display: flex; gap: 5px; padding: 2px 0; border-bottom: 1px solid #1a2a4a; font-size: 10px; }
+.dr:last-child { border-bottom: none; }
+.dl { color: #e94560; min-width: 85px; flex-shrink: 0; }
+.dv { color: #ddd; word-break: break-all; }
+.dv a { color: #4CAF50; text-decoration: none; }
+.nf { color: #ff6b6b; font-size: 11px; padding: 4px 6px; background: #2a1a1a; border-radius: 3px; margin-top: 4px; }
+#gb { padding: 7px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; margin-top: 8px; width: 100%; }
+#welcome { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); background: #16213e; border: 1px solid #0f3460; border-radius: 10px; padding: 30px 40px; text-align: center; z-index: 500; }
+#welcome h2 { color: #e94560; margin-bottom: 12px; }
+#welcome p { color: #aaa; font-size: 13px; margin-bottom: 20px; line-height: 1.6; }
+#welcome-btn { padding: 10px 24px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+#overlay { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.7); z-index: 9999; align-items: center; justify-content: center; }
+#overlay.show { display: flex; }
+#overlay-box { background: #16213e; border: 1px solid #0f3460; border-radius: 10px; padding: 24px 30px; text-align: center; }
+#overlay-box p { color: #4CAF50; font-size: 14px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div id="header">
+  <h1>КЕЦ Карлово GPS</h1>
+  <input type="text" id="itn-input" placeholder="ИТН номера..." />
+  <button id="mic-btn" onclick="startVoice()" title="Гласово въвеждане" style="padding:7px 12px;background:#0f3460;color:#eee;border:1px solid #0f3460;border-radius:6px;cursor:pointer;font-size:16px;">&#127908;</button>
+  <button id="btn" onclick="findAndShow()">Покажи</button>
+  <div class="mtoggle">
+    <button id="bs" class="active" onclick="swL('street')">Карта</button>
+    <button id="bsat" onclick="swL('sat')">Сателит</button>
+    <button id="bh" onclick="swL('hybrid')">Хибрид</button>
+  </div>
+  <button id="load-btn" onclick="document.getElementById('file-input').click()">Зареди Excel</button>
+  <button id="clear-btn" onclick="clearCache();document.getElementById('file-input').click()" style="padding:6px 12px;background:#0f3460;color:#FF9800;border:1px solid #FF9800;border-radius:6px;cursor:pointer;font-size:12px;white-space:nowrap;">Обнови данни</button>
+  <input type="file" id="file-input" onchange="loadExcel(this)">
+  <span id="status">Няма заредени данни</span>
+</div>
+<div id="map"></div>
+
+<div id="welcome">
+  <h2>КЕЦ Карлово GPS</h2>
+  <p>Натисни бутона за да заредиш<br>Excel файла с координатите.</p>
+  <button id="welcome-btn" onclick="document.getElementById('file-input').click()">Избери Excel файл</button>
+</div>
+
+<div id="panel">
+  <div id="ph"><h3>Резултати</h3><span id="pc" onclick="document.getElementById('panel').style.display='none'">X</span></div>
+  <div id="rlist"></div>
+  <button id="gb" onclick="openGMaps()">Отвори в Google Maps</button>
+</div>
+
+<div id="overlay">
+  <div id="overlay-box">
+    <h3 style="color:#e94560">Зареждане...</h3>
+    <p id="ovp" style="color:#4CAF50;font-size:13px;margin-top:8px">Четене на файла...</p>
+  </div>
+</div>
+
+<script>
+var D = {};
+var map, layers=[], found=[], cur='street', tl={};
+
+// Име на Excel файла - смени ако файлът се казва различно
+var EXCEL_FILENAME = 'GPS_koordinati_na_klientite_na_KEZ_Karlovo.xlsx';
+
+function init() {
+  tl.street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution:'OSM', maxZoom:19});
+  tl.sat    = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {attribution:'Google', maxZoom:20});
+  tl.hybrid = L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {attribution:'Google', maxZoom:20});
+  map = L.map('map').setView([42.64, 24.85], 11);
+  tl.street.addTo(map);
+  autoLoad();
+}
+
+// Опитай да зареди от кеша (IndexedDB)
+function autoLoad() {
+  document.getElementById('ovp').textContent = 'Търся кеширани данни...';
+  document.getElementById('overlay').classList.add('show');
+  var req = indexedDB.open('KEZ_GPS', 1);
+  req.onupgradeneeded = function(e) { e.target.result.createObjectStore('files'); };
+  req.onsuccess = function(e) {
+    var get = e.target.result.transaction('files','readonly').objectStore('files').get('excel');
+    get.onsuccess = function() {
+      if (get.result) {
+        document.getElementById('ovp').textContent = 'Зареждам ' + get.result.name + '...';
+        processExcelBuffer(get.result.buf, get.result.name);
+      } else {
+        document.getElementById('overlay').classList.remove('show');
+        document.getElementById('welcome').style.display = 'block';
+        document.getElementById('status').textContent = 'Зареди Excel файла';
+      }
+    };
+    get.onerror = function() {
+      document.getElementById('overlay').classList.remove('show');
+      document.getElementById('welcome').style.display = 'block';
+    };
+  };
+  req.onerror = function() {
+    document.getElementById('overlay').classList.remove('show');
+    document.getElementById('welcome').style.display = 'block';
+  };
+}
+
+function saveToCache(buf, name) {
+  var req = indexedDB.open('KEZ_GPS', 1);
+  req.onupgradeneeded = function(e) { e.target.result.createObjectStore('files'); };
+  req.onsuccess = function(e) {
+    e.target.result.transaction('files','readwrite').objectStore('files').put({buf:buf, name:name}, 'excel');
+  };
+}
+
+function clearCache() {
+  var req = indexedDB.open('KEZ_GPS', 1);
+  req.onsuccess = function(e) {
+    e.target.result.transaction('files','readwrite').objectStore('files').delete('excel');
+    alert('Кешът е изчистен. При следващо отваряне ще се поиска файлът отново.');
+  };
+}
+
+function swL(t) {
+  if (cur===t) return;
+  map.removeLayer(tl[cur]); tl[t].addTo(map); cur=t;
+  ['street','sat','hybrid'].forEach(function(x){
+    document.getElementById(x==='street'?'bs':x==='sat'?'bsat':'bh').classList.toggle('active', x===t);
+  });
+}
+
+function loadExcel(input) {
+  var file = input.files[0];
+  if (!file) return;
+  input.value = '';
+  document.getElementById('overlay').classList.add('show');
+  document.getElementById('ovp').textContent = 'Четене на ' + file.name + '...';
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    setTimeout(function() { processExcelBuffer(e.target.result, file.name); }, 100);
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function processExcelBuffer(buf, filename) {
+  try {
+    document.getElementById('ovp').textContent = 'Обработка на данните...';
+    var wb = XLSX.read(new Uint8Array(buf), {type:'array'});
+    var ws = wb.Sheets[wb.SheetNames[0]];
+    var rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+
+    // Намери хедър реда
+    var hi = -1;
+    for (var r=0; r<Math.min(rows.length,10); r++) {
+      for (var c=0; c<rows[r].length; c++) {
+        if (String(rows[r][c]).trim().toUpperCase() === 'ИТН') { hi=r; break; }
+      }
+      if (hi>=0) break;
+    }
+    if (hi<0) throw new Error('Не намирам колона ИТН');
+
+    var headers = rows[hi].map(function(h){ return String(h).trim(); });
+    var ci=-1, clat=-1, clon=-1;
+
+    // По имена
+    headers.forEach(function(h,i){
+      var u=h.toUpperCase();
+      if (u==='ИТН') ci=i;
+      if ((u==='X'||u==='LAT'||u==='LATITUDE') && clat<0) clat=i;
+      if ((u==='Y'||u==='LON'||u==='LNG'||u==='LONGITUDE') && clon<0) clon=i;
+    });
+
+    // По стойности
+    if (ci<0 || clat<0 || clon<0) {
+      var fd = rows[hi+1];
+      fd.forEach(function(v,i){
+        var n=parseFloat(String(v).replace(',','.'));
+        if (isNaN(n)) return;
+        if (ci<0 && n>=1000000 && n===Math.floor(n)) { ci=i; return; }
+        if (clat<0 && n>=41.0 && n<=44.5) { clat=i; return; }
+        if (clon<0 && n>=22.0 && n<=28.5) { clon=i; return; }
+      });
+    }
+
+    if (ci<0 || clat<0 || clon<0) throw new Error('Не намирам ИТН/Lat/Lon колони');
+
+    var skip = ['X.1','Y.1','maps','maps.1','Разлика в метри'];
+    var newD = {}, count=0;
+
+    for (var ri=hi+1; ri<rows.length; ri++) {
+      var row=rows[ri];
+      var itn=String(row[ci]).trim().replace(/[^0-9]/g,'');
+      if (!itn||itn==='0') continue;
+      var lat=parseFloat(String(row[clat]).replace(',','.'));
+      var lon=parseFloat(String(row[clon]).replace(',','.'));
+      if (!lat||!lon||isNaN(lat)||isNaN(lon)) continue;
+      var extra={};
+      headers.forEach(function(h,xi){
+        if (xi===ci||xi===clat||xi===clon||!h||skip.indexOf(h)>=0) return;
+        var val=String(row[xi]).trim();
+        if (!val||val==='0'||val==='.'||val==='undefined'||val==='') return;
+        extra[h]=val;
+      });
+      newD[itn]=[lat,lon,extra];
+      count++;
+    }
+
+    D = newD;
+    saveToCache(buf, filename);
+    document.getElementById('status').textContent = filename + ': ' + count.toLocaleString() + ' записа';
+    document.getElementById('welcome').style.display = 'none';
+    document.getElementById('overlay').classList.remove('show');
+
+  } catch(err) {
+    document.getElementById('overlay').classList.remove('show');
+    alert('Грешка: ' + err.message);
+  }
+}
+
+function startVoice() {
+  var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    alert('Браузърът не поддържа гласово въвеждане. Използвай Chrome или Edge.');
+    return;
+  }
+  var rec = new SpeechRecognition();
+  rec.lang = 'bg-BG';
+  rec.interimResults = false;
+  rec.maxAlternatives = 1;
+
+  var btn = document.getElementById('mic-btn');
+  btn.style.color = '#e94560';
+  btn.style.borderColor = '#e94560';
+  btn.innerHTML = '&#9210;'; // запис
+
+  rec.onresult = function(e) {
+    var text = e.results[0][0].transcript;
+    // Извади само цифрите
+    var digits = text.replace(/[^0-9 ]/g, '').trim();
+    document.getElementById('itn-input').value = digits || text;
+    btn.style.color = '#4CAF50';
+    btn.style.borderColor = '#4CAF50';
+    btn.innerHTML = '&#127908;';
+    // Автоматично търси след гласово въвеждане
+    if (digits) findAndShow();
+  };
+
+  rec.onerror = function(e) {
+    btn.style.color = '#eee';
+    btn.style.borderColor = '#0f3460';
+    btn.innerHTML = '&#127908;';
+    if (e.error !== 'no-speech') alert('Грешка: ' + e.error);
+  };
+
+  rec.onend = function() {
+    btn.style.color = '#eee';
+    btn.style.borderColor = '#0f3460';
+    btn.innerHTML = '&#127908;';
+  };
+
+  rec.start();
+}
+
+
+var C=['#e94560','#4CAF50','#2196F3','#FF9800','#9C27B0','#00BCD4','#FF5722','#795548'];
+
+function det(p,i) {
+  var extra=p.r[2];
+  var rows=[['ИТН',p.itn],['Коорд.',p.r[0].toFixed(6)+', '+p.r[1].toFixed(6)]];
+  Object.keys(extra).forEach(function(k){
+    var v=extra[k];
+    if (v.indexOf('http')===0) v='<a href="'+v+'" target="_blank">Отвори</a>';
+    rows.push([k,v]);
+  });
+  rows.push(['Maps','<a href="https://maps.google.com/?q='+p.r[0]+','+p.r[1]+'" target="_blank">Отвори</a>']);
+  return '<div class="dc" id="dc'+i+'">'+rows.map(function(x){
+    return '<div class="dr"><span class="dl">'+x[0]+'</span><span class="dv">'+x[1]+'</span></div>';
+  }).join('')+'</div>';
+}
+
+function tog(i) {
+  var c=document.getElementById('dc'+i), b=document.getElementById('eb'+i);
+  c.classList.toggle('open');
+  b.textContent=c.classList.contains('open')?'Скрий':'Детайли';
+}
+
+function findAndShow() {
+  if (!Object.keys(D).length) { alert('Първо зареди Excel файла!'); return; }
+  var raw=document.getElementById('itn-input').value;
+  var itns=raw.split(/[\s,;\n]+/).map(function(s){return s.trim();}).filter(Boolean);
+  if (!itns.length) { alert('Въведи ИТН!'); return; }
+  clr();
+  var nf=[];
+  itns.forEach(function(itn){
+    var r=D[itn];
+    if (r) found.push({itn:itn,lat:r[0],lon:r[1],r:r});
+    else nf.push(itn);
+  });
+  found.forEach(function(p,i){
+    var col=C[i%C.length];
+    var icon=L.divIcon({className:'',
+      html:'<div style="background:'+col+';color:#fff;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.5)">'+(i+1)+'</div>',
+      iconSize:[30,30],iconAnchor:[15,15]});
+    var ex=p.r[2];
+    var nm=ex['Клиент име']||ex['Клиент']||'';
+    var pl=ex['Нас място']||ex['Нас. място']||'';
+    var m=L.marker([p.lat,p.lon],{icon:icon}).addTo(map)
+      .bindPopup('<b>'+p.itn+'</b>'+(nm?'<br>'+nm:'')+(pl?'<br><small>'+pl+'</small>':''));
+    layers.push(m);
+  });
+  if (found.length>1) {
+    var ln=L.polyline(found.map(function(p){return[p.lat,p.lon];}),{color:'#e94560',weight:2.5,dashArray:'8,5'}).addTo(map);
+    layers.push(ln); map.fitBounds(ln.getBounds(),{padding:[50,50]});
+  } else if (found.length===1) {
+    map.setView([found[0].lat,found[0].lon],16); layers[0].openPopup();
+  }
+  var h='';
+  found.forEach(function(p,i){
+    var col=C[i%C.length];
+    var ex=p.r[2];
+    var nm=ex['Клиент име']||ex['Клиент']||p.itn;
+    var pl=ex['Нас място']||ex['Нас. място']||'';
+    h+='<div class="ri"><div onclick="map.setView(['+p.lat+','+p.lon+'],16);layers['+i+'].openPopup()">'+
+      '<button class="x" id="eb'+i+'" onclick="event.stopPropagation();tog('+i+')">Детайли</button>'+
+      '<div class="n" style="color:'+col+'">'+(i+1)+'. '+p.itn+'</div>'+
+      '<div class="c">'+nm+'</div>'+(pl?'<div class="p">'+pl+'</div>':'')+
+    '</div>'+det(p,i)+'</div>';
+  });
+  if (nf.length) h+='<div class="nf">Ненамерени: '+nf.join(', ')+'</div>';
+  document.getElementById('rlist').innerHTML=h;
+  document.getElementById('panel').style.display='block';
+  document.getElementById('status').textContent='Намерени: '+found.length+(nf.length?' | Ненамерени: '+nf.length:'');
+}
+
+function openGMaps() {
+  if (!found.length) return;
+  if (found.length===1) { window.open('https://maps.google.com/?q='+found[0].lat+','+found[0].lon,'_blank'); return; }
+  var o=found[0], d=found[found.length-1];
+  var w=found.slice(1,-1).map(function(p){return p.lat+','+p.lon;}).join('|');
+  var u='https://www.google.com/maps/dir/?api=1&origin='+o.lat+','+o.lon+'&destination='+d.lat+','+d.lon;
+  if (w) u+='&waypoints='+w;
+  window.open(u,'_blank');
+}
+
+document.getElementById('itn-input').addEventListener('keydown',function(e){
+  if (e.key==='Enter') { e.preventDefault(); findAndShow(); }
+});
+
+init();
+
+
+// Получи Excel файл от Android (base64)
+function receiveFileFromAndroid(b64, filename) {
+  try {
+    var binary = atob(b64);
+    var bytes = new Uint8Array(binary.length);
+    for (var i=0; i<binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    document.getElementById('overlay').classList.add('show');
+    document.getElementById('ovp').textContent = 'Обработка на ' + filename + '...';
+    setTimeout(function() { processExcelBuffer(bytes.buffer, filename); }, 100);
+  } catch(e) {
+    alert('Грешка при получаване на файла: ' + e.message);
+  }
+}
+
+function clr() { layers.forEach(function(l){map.removeLayer(l);}); layers=[]; found=[]; }
+var C=['#e94560','#4CAF50','#2196F3','#FF9800','#9C27B0','#00BCD4','#FF5722','#795548'];
+
+function det(p,i) {
+  var extra=p.r[2];
+  var rows=[['ИТН',p.itn],['Коорд.',p.r[0].toFixed(6)+', '+p.r[1].toFixed(6)]];
+  Object.keys(extra).forEach(function(k){
+    var v=extra[k];
+    if (v.indexOf('http')===0) v='<a href="'+v+'" target="_blank">Отвори</a>';
+    rows.push([k,v]);
+  });
+  rows.push(['Maps','<a href="https://maps.google.com/?q='+p.r[0]+','+p.r[1]+'" target="_blank">Отвори</a>']);
+  return '<div class="dc" id="dc'+i+'">'+rows.map(function(x){
+    return '<div class="dr"><span class="dl">'+x[0]+'</span><span class="dv">'+x[1]+'</span></div>';
+  }).join('')+'</div>';
+}
+
+function tog(i) {
+  var c=document.getElementById('dc'+i), b=document.getElementById('eb'+i);
+  c.classList.toggle('open');
+  b.textContent=c.classList.contains('open')?'Скрий':'Детайли';
+}
+
+function findAndShow() {
+  if (!Object.keys(D).length) { alert('Първо зареди Excel файла!'); return; }
+  var raw=document.getElementById('itn-input').value;
+  var itns=raw.split(/[\s,;\n]+/).map(function(s){return s.trim();}).filter(Boolean);
+  if (!itns.length) { alert('Въведи ИТН!'); return; }
+  clr();
+  var nf=[];
+  itns.forEach(function(itn){
+    var r=D[itn];
+    if (r) found.push({itn:itn,lat:r[0],lon:r[1],r:r});
+    else nf.push(itn);
+  });
+  found.forEach(function(p,i){
+    var col=C[i%C.length];
+    var icon=L.divIcon({className:'',
+      html:'<div style="background:'+col+';color:#fff;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.5)">'+(i+1)+'</div>',
+      iconSize:[30,30],iconAnchor:[15,15]});
+    var ex=p.r[2];
+    var nm=ex['Клиент име']||ex['Клиент']||'';
+    var pl=ex['Нас място']||ex['Нас. място']||'';
+    var m=L.marker([p.lat,p.lon],{icon:icon}).addTo(map)
+      .bindPopup('<b>'+p.itn+'</b>'+(nm?'<br>'+nm:'')+(pl?'<br><small>'+pl+'</small>':''));
+    layers.push(m);
+  });
+  if (found.length>1) {
+    var ln=L.polyline(found.map(function(p){return[p.lat,p.lon];}),{color:'#e94560',weight:2.5,dashArray:'8,5'}).addTo(map);
+    layers.push(ln); map.fitBounds(ln.getBounds(),{padding:[50,50]});
+  } else if (found.length===1) {
+    map.setView([found[0].lat,found[0].lon],16); layers[0].openPopup();
+  }
+  var h='';
+  found.forEach(function(p,i){
+    var col=C[i%C.length];
+    var ex=p.r[2];
+    var nm=ex['Клиент име']||ex['Клиент']||p.itn;
+    var pl=ex['Нас място']||ex['Нас. място']||'';
+    h+='<div class="ri"><div onclick="map.setView(['+p.lat+','+p.lon+'],16);layers['+i+'].openPopup()">'+
+      '<button class="x" id="eb'+i+'" onclick="event.stopPropagation();tog('+i+')">Детайли</button>'+
+      '<div class="n" style="color:'+col+'">'+(i+1)+'. '+p.itn+'</div>'+
+      '<div class="c">'+nm+'</div>'+(pl?'<div class="p">'+pl+'</div>':'')+
+    '</div>'+det(p,i)+'</div>';
+  });
+  if (nf.length) h+='<div class="nf">Ненамерени: '+nf.join(', ')+'</div>';
+  document.getElementById('rlist').innerHTML=h;
+  document.getElementById('panel').style.display='block';
+  document.getElementById('status').textContent='Намерени: '+found.length+(nf.length?' | Ненамерени: '+nf.length:'');
+}
+
+function openGMaps() {
+  if (!found.length) return;
+  if (found.length===1) { window.open('https://maps.google.com/?q='+found[0].lat+','+found[0].lon,'_blank'); return; }
+  var o=found[0], d=found[found.length-1];
+  var w=found.slice(1,-1).map(function(p){return p.lat+','+p.lon;}).join('|');
+  var u='https://www.google.com/maps/dir/?api=1&origin='+o.lat+','+o.lon+'&destination='+d.lat+','+d.lon;
+  if (w) u+='&waypoints='+w;
+  window.open(u,'_blank');
+}
+
+document.getElementById('itn-input').addEventListener('keydown',function(e){
+  if (e.key==='Enter') { e.preventDefault(); findAndShow(); }
+});
+
+init();
+</script>
+</body>
+</html>

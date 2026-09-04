@@ -1,0 +1,211 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#1a1a2e">
+
+    <!-- Хедър -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:background="#16213e"
+        android:padding="8dp"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="КЕЦ GPS"
+            android:textColor="#e94560"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:paddingEnd="8dp"/>
+
+        <EditText
+            android:id="@+id/itn_input"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:hint="ИТН номера..."
+            android:hintTextColor="#888"
+            android:textColor="#ffffff"
+            android:background="@drawable/input_bg"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:inputType="number"
+            android:imeOptions="actionSearch"
+            android:singleLine="true"/>
+
+        <ImageButton
+            android:id="@+id/mic_btn"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:src="@android:drawable/ic_btn_speak_now"
+            android:background="@drawable/btn_bg"
+            android:contentDescription="Микрофон"
+            android:layout_marginStart="4dp"/>
+
+        <Button
+            android:id="@+id/search_btn"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:text="Покажи"
+            android:backgroundTint="#e94560"
+            android:textColor="#ffffff"
+            android:layout_marginStart="4dp"/>
+
+    </LinearLayout>
+
+    <!-- Бутони карта/сателит + зареди Excel -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:background="#16213e"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="6dp">
+
+        <Button
+            android:id="@+id/btn_map"
+            android:layout_width="0dp"
+            android:layout_height="32dp"
+            android:layout_weight="1"
+            android:text="Карта"
+            android:textSize="12sp"
+            android:backgroundTint="#e94560"
+            android:textColor="#ffffff"
+            android:layout_marginEnd="4dp"/>
+
+        <Button
+            android:id="@+id/btn_sat"
+            android:layout_width="0dp"
+            android:layout_height="32dp"
+            android:layout_weight="1"
+            android:text="Сателит"
+            android:textSize="12sp"
+            android:backgroundTint="#0f3460"
+            android:textColor="#aaaaaa"
+            android:layout_marginEnd="4dp"/>
+
+        <Button
+            android:id="@+id/btn_load"
+            android:layout_width="0dp"
+            android:layout_height="32dp"
+            android:layout_weight="1"
+            android:text="Зареди Excel"
+            android:textSize="11sp"
+            android:backgroundTint="#0f3460"
+            android:textColor="#4CAF50"/>
+
+        <TextView
+            android:id="@+id/status_text"
+            android:layout_width="0dp"
+            android:layout_height="32dp"
+            android:layout_weight="1"
+            android:text="Няма данни"
+            android:textColor="#888888"
+            android:textSize="10sp"
+            android:gravity="center"
+            android:paddingStart="4dp"/>
+
+    </LinearLayout>
+
+    <!-- Карта -->
+    <org.osmdroid.views.MapView
+        android:id="@+id/map"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"/>
+
+    <!-- Панел с резултати -->
+    <LinearLayout
+        android:id="@+id/results_panel"
+        android:layout_width="match_parent"
+        android:layout_height="220dp"
+        android:orientation="vertical"
+        android:background="#16213e"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:padding="8dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Резултати"
+                android:textColor="#e94560"
+                android:textStyle="bold"/>
+
+            <Button
+                android:id="@+id/btn_gmaps"
+                android:layout_width="wrap_content"
+                android:layout_height="32dp"
+                android:text="Google Maps"
+                android:textSize="11sp"
+                android:backgroundTint="#4CAF50"
+                android:textColor="#ffffff"
+                android:layout_marginEnd="8dp"/>
+
+            <TextView
+                android:id="@+id/btn_close"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="✕"
+                android:textColor="#aaaaaa"
+                android:textSize="18sp"
+                android:padding="4dp"/>
+
+        </LinearLayout>
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/results_list"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:padding="4dp"/>
+
+    </LinearLayout>
+
+    <!-- Loading overlay -->
+    <FrameLayout
+        android:id="@+id/loading_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#CC000000"
+        android:visibility="gone"
+        android:elevation="10dp">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="#16213e"
+            android:padding="24dp">
+
+            <ProgressBar
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:indeterminateTint="#e94560"/>
+
+            <TextView
+                android:id="@+id/loading_text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Зареждане..."
+                android:textColor="#ffffff"
+                android:textSize="14sp"
+                android:layout_marginTop="12dp"/>
+
+        </LinearLayout>
+
+    </FrameLayout>
+
+</LinearLayout>
