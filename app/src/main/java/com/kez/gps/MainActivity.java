@@ -34,6 +34,7 @@ import org.apache.poi.ss.usermodel.CellType;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.osmdroid.config.Configuration;
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory;
@@ -61,9 +62,13 @@ public class MainActivity extends AppCompatActivity {
     // Файлово търсене — търси тези имена в Downloads и Documents
     private static final String[] EXCEL_NAMES = {
         "GPS_koordinati_na_klientite_na_KEZ_Karlovo.xlsx",
+        "GPS_koordinati_na_klientite_na_KEZ_Karlovo.xls",
         "GPS_koordinati.xlsx",
+        "GPS_koordinati.xls",
         "gps.xlsx",
-        "kez_gps.xlsx"
+        "gps.xls",
+        "kez_gps.xlsx",
+        "kez_gps.xls"
     };
 
     // UI
@@ -217,7 +222,7 @@ public class MainActivity extends AppCompatActivity {
 
     // Зареди от InputStream (file picker или директен файл)
     private void loadFromStream(InputStream is, String filename) throws Exception {
-        Workbook wb = new XSSFWorkbook(is);
+        Workbook wb = WorkbookFactory.create(is);
         Sheet sheet = wb.getSheetAt(0);
 
         // Намери хедър реда
