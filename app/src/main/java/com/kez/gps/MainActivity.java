@@ -223,7 +223,7 @@ public class MainActivity extends AppCompatActivity {
     // Зареди от InputStream - streaming режим за големи файлове
     private void loadFromStream(InputStream is, String filename) throws Exception {
 
-        // Буферирай в temp файл (нужно за ZIP навигация в .xlsx)
+        // Буферирай в temp файл
         File tmpFile = File.createTempFile("kez_excel", ".tmp", getCacheDir());
         try {
             java.io.FileOutputStream fos = new java.io.FileOutputStream(tmpFile);
@@ -235,17 +235,30 @@ public class MainActivity extends AppCompatActivity {
 
             runOnUiThread(() -> loadingText.setText("Анализиране на структурата..."));
 
-            // Опитай .xlsx streaming първо
-            try {
+            // Провери магическите байтове за да разберем формата
+            boolean isXlsx = isXlsxFormat(tmpFile);
+
+            if (isXlsx) {
+                // .xlsx - използвай SAX streaming (малко памет)
                 loadXlsxStreaming(new java.io.FileInputStream(tmpFile), filename);
-            } catch (Exception e) {
-                // Ако е .xls - зареди с HSSF (по-малко памет)
+            } else {
+                // .xls - използвай HSSF
                 runOnUiThread(() -> loadingText.setText("Четене на .xls файл..."));
                 loadXlsFallback(new java.io.FileInputStream(tmpFile), filename);
             }
         } finally {
             tmpFile.delete();
         }
+    }
+
+    // Провери дали файлът е .xlsx (ZIP формат) или .xls (OLE2 формат)
+    private boolean isXlsxFormat(File file) throws Exception {
+        java.io.FileInputStream fis = new java.io.FileInputStream(file);
+        byte[] magic = new byte[4];
+        fis.read(magic);
+        fis.close();
+        // ZIP магически байтове: PK (50 4B 03 04)
+        return magic[0] == 0x50 && magic[1] == 0x4B;
     }
 
     // Streaming четене на .xlsx чрез SAX (не зарежда всичко в RAM)
