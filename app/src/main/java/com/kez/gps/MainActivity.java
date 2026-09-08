@@ -251,18 +251,32 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // Провери дали файлът е .xlsx (ZIP формат) или .xls (OLE2 формат)
+    // Провери дали файлът е истински .xlsx (има Content_Types.xml вътре)
     private boolean isXlsxFormat(File file) throws Exception {
         java.io.FileInputStream fis = new java.io.FileInputStream(file);
         byte[] magic = new byte[4];
         fis.read(magic);
         fis.close();
-        // ZIP магически байтове: PK (50 4B 03 04)
-        return magic[0] == 0x50 && magic[1] == 0x4B;
+
+        // Ако не е ZIP - определено е .xls
+        if (!(magic[0] == 0x50 && magic[1] == 0x4B)) return false;
+
+        // Провери дали ZIP-ът съдържа [Content_Types].xml
+        try {
+            java.util.zip.ZipFile zip = new java.util.zip.ZipFile(file);
+            boolean hasContentTypes = zip.getEntry("[Content_Types].xml") != null;
+            zip.close();
+            return hasContentTypes;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     // Streaming четене на .xlsx чрез SAX (не зарежда всичко в RAM)
     private void loadXlsxStreaming(InputStream is, String filename) throws Exception {
+        // Премахни ограничението за размер на масиви в POI
+        org.apache.poi.util.IOUtils.setByteArrayMaxOverride(-1);
+
         org.apache.poi.openxml4j.opc.OPCPackage pkg = org.apache.poi.openxml4j.opc.OPCPackage.open(is);
         org.apache.poi.xssf.eventusermodel.XSSFReader reader = new org.apache.poi.xssf.eventusermodel.XSSFReader(pkg);
         org.apache.poi.xssf.model.SharedStringsTable sst = (org.apache.poi.xssf.model.SharedStringsTable) reader.getSharedStringsTable();
