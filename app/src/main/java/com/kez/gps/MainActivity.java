@@ -34,8 +34,8 @@ import org.apache.poi.ss.usermodel.CellType;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
-import org.apache.poi.ss.usermodel.WorkbookFactory;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.poi.xssf.eventusermodel.XSSFReader;
+import org.apache.poi.xssf.model.SharedStringsTable;
 import org.osmdroid.config.Configuration;
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory;
 import org.osmdroid.util.GeoPoint;
@@ -220,112 +220,323 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    // Зареди от InputStream (file picker или директен файл)
+    // Зареди от InputStream - streaming режим за големи файлове
     private void loadFromStream(InputStream is, String filename) throws Exception {
-        Workbook wb = WorkbookFactory.create(is);
+
+        // Буферирай в temp файл (нужно за ZIP навигация в .xlsx)
+        File tmpFile = File.createTempFile("kez_excel", ".tmp", getCacheDir());
+        try {
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(tmpFile);
+            byte[] buf = new byte[65536];
+            int len;
+            while ((len = is.read(buf)) != -1) fos.write(buf, 0, len);
+            fos.close();
+            is.close();
+
+            runOnUiThread(() -> loadingText.setText("Анализиране на структурата..."));
+
+            // Опитай .xlsx streaming първо
+            try {
+                loadXlsxStreaming(new java.io.FileInputStream(tmpFile), filename);
+            } catch (Exception e) {
+                // Ако е .xls - зареди с HSSF (по-малко памет)
+                runOnUiThread(() -> loadingText.setText("Четене на .xls файл..."));
+                loadXlsFallback(new java.io.FileInputStream(tmpFile), filename);
+            }
+        } finally {
+            tmpFile.delete();
+        }
+    }
+
+    // Streaming четене на .xlsx чрез SAX (не зарежда всичко в RAM)
+    private void loadXlsxStreaming(InputStream is, String filename) throws Exception {
+        org.apache.poi.openxml4j.opc.OPCPackage pkg = org.apache.poi.openxml4j.opc.OPCPackage.open(is);
+        org.apache.poi.xssf.eventusermodel.XSSFReader reader = new org.apache.poi.xssf.eventusermodel.XSSFReader(pkg);
+        org.apache.poi.xssf.model.SharedStringsTable sst = (org.apache.poi.xssf.model.SharedStringsTable) reader.getSharedStringsTable();
+
+        // Вземи само първия лист
+        java.util.Iterator<InputStream> sheets = reader.getSheetsData();
+        if (!sheets.hasNext()) throw new Exception("Няма листове в файла");
+        InputStream sheetStream = sheets.next();
+
+        // SAX парсер
+        javax.xml.parsers.SAXParserFactory factory = javax.xml.parsers.SAXParserFactory.newInstance();
+        javax.xml.parsers.SAXParser parser = factory.newSAXParser();
+
+        XlsxSheetHandler handler = new XlsxSheetHandler(sst, filename);
+        parser.parse(sheetStream, handler);
+        sheetStream.close();
+        pkg.close();
+    }
+
+    // Fallback за .xls с ограничена памет
+    private void loadXlsFallback(InputStream is, String filename) throws Exception {
+        org.apache.poi.hssf.usermodel.HSSFWorkbook wb =
+            new org.apache.poi.hssf.usermodel.HSSFWorkbook(is);
         Sheet sheet = wb.getSheetAt(0);
+        processSheet(sheet, filename);
+        wb.close();
+        is.close();
+    }
 
-        // Намери хедър реда
-        int headerRow = -1;
-        int colITN = -1, colLat = -1, colLon = -1;
+    // SAX Handler за .xlsx
+    class XlsxSheetHandler extends org.xml.sax.helpers.DefaultHandler {
+        private org.apache.poi.xssf.model.SharedStringsTable sst;
+        private String filename;
+        private boolean inValue = false;
+        private boolean isSharedString = false;
+        private StringBuilder value = new StringBuilder();
+        private List<String> currentRow = new ArrayList<>();
+        private List<String> headers = new ArrayList<>();
+        private int rowNum = 0;
+        private int headerRow = -1;
+        private int colITN = -1, colLat = -1, colLon = -1;
+        private int[] latCount, lonCount;
+        private int scanRows = 0;
+        private Map<String, GpsRecord> newData = new HashMap<>();
+        private int colIndex = 0;
+        private String currentCellRef = "";
 
+        XlsxSheetHandler(org.apache.poi.xssf.model.SharedStringsTable sst, String filename) {
+            this.sst = sst;
+            this.filename = filename;
+        }
+
+        @Override
+        public void startElement(String uri, String localName, String name, org.xml.sax.Attributes attrs) {
+            if ("row".equals(name)) {
+                currentRow.clear();
+                colIndex = 0;
+            } else if ("c".equals(name)) {
+                currentCellRef = attrs.getValue("r") != null ? attrs.getValue("r") : "";
+                String t = attrs.getValue("t");
+                isSharedString = "s".equals(t);
+                value.setLength(0);
+                inValue = false;
+                // Изчисли индекс на колона от референцията (A=0, B=1, ...)
+                colIndex = cellRefToColIndex(currentCellRef);
+                // Попълни с празни стрингове до текущата колона
+                while (currentRow.size() <= colIndex) currentRow.add("");
+            } else if ("v".equals(name) || "t".equals(name)) {
+                inValue = true;
+                value.setLength(0);
+            }
+        }
+
+        @Override
+        public void characters(char[] ch, int start, int length) {
+            if (inValue) value.append(ch, start, length);
+        }
+
+        @Override
+        public void endElement(String uri, String localName, String name) {
+            if ("v".equals(name) || "t".equals(name)) {
+                inValue = false;
+                String val = value.toString();
+                if (isSharedString) {
+                    try {
+                        int idx = Integer.parseInt(val);
+                        val = sst.getItemAt(idx).getString();
+                    } catch (Exception e) { /* ignore */ }
+                }
+                while (currentRow.size() <= colIndex) currentRow.add("");
+                currentRow.set(colIndex, val);
+            } else if ("row".equals(name)) {
+                processRow();
+                rowNum++;
+            }
+        }
+
+        private int cellRefToColIndex(String ref) {
+            int col = 0;
+            for (char c : ref.toCharArray()) {
+                if (Character.isLetter(c)) {
+                    col = col * 26 + (Character.toUpperCase(c) - 'A' + 1);
+                } else break;
+            }
+            return col - 1;
+        }
+
+        private void processRow() {
+            if (currentRow.isEmpty()) return;
+
+            // Намери хедър реда
+            if (headerRow < 0) {
+                for (int c = 0; c < currentRow.size(); c++) {
+                    if ("ИТН".equalsIgnoreCase(currentRow.get(c).trim())) {
+                        headerRow = rowNum;
+                        headers = new ArrayList<>(currentRow);
+                        colITN = c;
+                        // Намери X и Y по имена
+                        for (int i = 0; i < headers.size(); i++) {
+                            String u = headers.get(i).trim().toUpperCase();
+                            if ((u.equals("X") || u.equals("LAT") || u.equals("LATITUDE")) && colLat < 0) colLat = i;
+                            if ((u.equals("Y") || u.equals("LON") || u.equals("LNG") || u.equals("LONGITUDE")) && colLon < 0) colLon = i;
+                        }
+                        latCount = new int[headers.size() + 50];
+                        lonCount = new int[headers.size() + 50];
+                        return;
+                    }
+                }
+                return;
+            }
+
+            // Сканирай първите 10 реда за координатни колони
+            if ((colLat < 0 || colLon < 0) && scanRows < 10) {
+                for (int c = 0; c < currentRow.size() && c < latCount.length; c++) {
+                    try {
+                        double v = Double.parseDouble(currentRow.get(c).replace(",", "."));
+                        if (v >= 41.5 && v <= 44.5 && v != Math.floor(v)) latCount[c]++;
+                        if (v >= 22.0 && v <= 28.5 && v != Math.floor(v)) lonCount[c]++;
+                    } catch (Exception e) { /* not numeric */ }
+                }
+                scanRows++;
+                if (scanRows == 10) {
+                    if (colLat < 0) {
+                        int max = 0;
+                        for (int c = 0; c < latCount.length; c++)
+                            if (latCount[c] > max) { max = latCount[c]; colLat = c; }
+                    }
+                    if (colLon < 0) {
+                        int max = 0;
+                        for (int c = 0; c < lonCount.length; c++)
+                            if (lonCount[c] > max && c != colLat) { max = lonCount[c]; colLon = c; }
+                    }
+                }
+            }
+
+            if (colITN < 0 || colLat < 0 || colLon < 0) return;
+
+            // Обработи ред с данни
+            String itn = colITN < currentRow.size() ?
+                currentRow.get(colITN).trim().replaceAll("[^0-9]", "") : "";
+            if (itn.isEmpty() || itn.equals("0")) return;
+
+            try {
+                double lat = colLat < currentRow.size() ?
+                    Double.parseDouble(currentRow.get(colLat).replace(",", ".")) : 0;
+                double lon = colLon < currentRow.size() ?
+                    Double.parseDouble(currentRow.get(colLon).replace(",", ".")) : 0;
+                if (lat == 0 || lon == 0) return;
+
+                Map<String, String> extra = new HashMap<>();
+                List<String> skipList = java.util.Arrays.asList("X.1","Y.1","MAPS","MAPS.1","РАЗЛИКА В МЕТРИ");
+                for (int c = 0; c < headers.size() && c < currentRow.size(); c++) {
+                    if (c == colITN || c == colLat || c == colLon) continue;
+                    String h = headers.get(c).trim();
+                    if (h.isEmpty() || skipList.contains(h.toUpperCase())) continue;
+                    String v = currentRow.get(c).trim();
+                    if (!v.isEmpty() && !v.equals("0") && !v.equals(".")) extra.put(h, v);
+                }
+                newData.put(itn, new GpsRecord(itn, lat, lon, extra));
+            } catch (Exception e) { /* skip row */ }
+
+            // Прогрес на всеки 5000 реда
+            if (newData.size() % 5000 == 0 && newData.size() > 0) {
+                final int cnt = newData.size();
+                runOnUiThread(() -> loadingText.setText("Заредени: " + cnt + " записа..."));
+            }
+        }
+
+        @Override
+        public void endDocument() {
+            if (colLat < 0 || colLon < 0) {
+                runOnUiThread(() -> {
+                    hideLoading();
+                    Toast.makeText(MainActivity.this,
+                        "Не намирам координатни колони!", Toast.LENGTH_LONG).show();
+                });
+                return;
+            }
+            final Map<String, GpsRecord> result = newData;
+            final String fname = filename;
+            runOnUiThread(() -> {
+                gpsData = result;
+                hideLoading();
+                statusText.setText(fname + ": " + String.format("%,d", result.size()) + " записа");
+                Toast.makeText(MainActivity.this,
+                    "Заредени " + result.size() + " клиента!", Toast.LENGTH_SHORT).show();
+            });
+        }
+    }
+
+    // Обработи Sheet обект (за .xls fallback)
+    private void processSheet(Sheet sheet, String filename) {
+        int headerRow = -1, colITN = -1, colLat = -1, colLon = -1;
+        List<String> headers = new ArrayList<>();
+
+        // Намери хедъра
         for (int r = 0; r <= Math.min(10, sheet.getLastRowNum()); r++) {
             Row row = sheet.getRow(r);
             if (row == null) continue;
             for (int c = 0; c < row.getLastCellNum(); c++) {
-                String val = getCellString(row.getCell(c)).trim().toUpperCase();
-                if (val.equals("ИТН")) {
-                    headerRow = r;
-                    colITN = c;
-                    break;
+                if ("ИТН".equalsIgnoreCase(getCellString(row.getCell(c)).trim())) {
+                    headerRow = r; colITN = c; break;
                 }
             }
             if (headerRow >= 0) break;
         }
+        if (headerRow < 0) throw new RuntimeException("Не намирам колона ИТН");
 
-        if (headerRow < 0) throw new Exception("Не намирам колона ИТН");
-
-        // Намери X и Y колони по имена
         Row hRow = sheet.getRow(headerRow);
-        List<String> headers = new ArrayList<>();
         for (int c = 0; c < hRow.getLastCellNum(); c++) {
             String h = getCellString(hRow.getCell(c)).trim();
             headers.add(h);
             String u = h.toUpperCase();
-            if ((u.equals("X") || u.equals("LAT") || u.equals("LATITUDE")) && colLat < 0) colLat = c;
-            if ((u.equals("Y") || u.equals("LON") || u.equals("LNG") || u.equals("LONGITUDE")) && colLon < 0) colLon = c;
+            if ((u.equals("X")||u.equals("LAT")) && colLat<0) colLat=c;
+            if ((u.equals("Y")||u.equals("LON")||u.equals("LNG")) && colLon<0) colLon=c;
         }
 
-        // Намери по стойности ако не са намерени по имена
+        // По стойности ако не намерени
         if (colLat < 0 || colLon < 0) {
-            Row firstData = sheet.getRow(headerRow + 1);
-            if (firstData != null) {
-                for (int c = 0; c < firstData.getLastCellNum(); c++) {
-                    Cell cell = firstData.getCell(c);
+            int[] lc = new int[headers.size()], nc = new int[headers.size()];
+            for (int r = headerRow+1; r <= Math.min(headerRow+10, sheet.getLastRowNum()); r++) {
+                Row row = sheet.getRow(r);
+                if (row == null) continue;
+                for (int c = 0; c < headers.size(); c++) {
+                    Cell cell = row.getCell(c);
                     if (cell == null || cell.getCellType() != CellType.NUMERIC) continue;
                     double v = cell.getNumericCellValue();
-                    if (colLat < 0 && v >= 41.0 && v <= 44.5) { colLat = c; continue; }
-                    if (colLon < 0 && v >= 22.0 && v <= 28.5) { colLon = c; continue; }
+                    if (v>=41.5 && v<=44.5 && v!=Math.floor(v)) lc[c]++;
+                    if (v>=22.0 && v<=28.5 && v!=Math.floor(v)) nc[c]++;
                 }
             }
+            if (colLat<0) { int mx=0; for(int c=0;c<lc.length;c++) if(lc[c]>mx){mx=lc[c];colLat=c;} }
+            if (colLon<0) { int mx=0; for(int c=0;c<nc.length;c++) if(nc[c]>mx&&c!=colLat){mx=nc[c];colLon=c;} }
         }
 
-        if (colLat < 0 || colLon < 0) throw new Exception("Не намирам координатни колони");
+        if (colLat<0||colLon<0) throw new RuntimeException("Не намирам координатни колони");
 
-        // Прочети данните
         Map<String, GpsRecord> newData = new HashMap<>();
-        List<String> skipCols = new ArrayList<>();
-        skipCols.add("X.1"); skipCols.add("Y.1"); skipCols.add("MAPS");
-        skipCols.add("MAPS.1"); skipCols.add("РАЗЛИКА В МЕТРИ");
-
-        for (int r = headerRow + 1; r <= sheet.getLastRowNum(); r++) {
+        List<String> skipList = java.util.Arrays.asList("X.1","Y.1","MAPS","MAPS.1");
+        for (int r = headerRow+1; r <= sheet.getLastRowNum(); r++) {
             Row row = sheet.getRow(r);
-            if (row == null) continue;
-
-            String itn = getCellString(row.getCell(colITN)).trim().replaceAll("[^0-9]", "");
-            if (itn.isEmpty() || itn.equals("0")) continue;
-
-            Cell latCell = row.getCell(colLat);
-            Cell lonCell = row.getCell(colLon);
-            if (latCell == null || lonCell == null) continue;
-
-            double lat = 0, lon = 0;
+            if (row==null) continue;
+            String itn = getCellString(row.getCell(colITN)).trim().replaceAll("[^0-9]","");
+            if (itn.isEmpty()||itn.equals("0")) continue;
             try {
-                lat = latCell.getCellType() == CellType.NUMERIC ?
-                    latCell.getNumericCellValue() :
-                    Double.parseDouble(getCellString(latCell).replace(",", "."));
-                lon = lonCell.getCellType() == CellType.NUMERIC ?
-                    lonCell.getNumericCellValue() :
-                    Double.parseDouble(getCellString(lonCell).replace(",", "."));
-            } catch (Exception e) { continue; }
-
-            if (lat == 0 || lon == 0) continue;
-
-            // Вземи всички останали колони
-            Map<String, String> extra = new HashMap<>();
-            for (int c = 0; c < headers.size(); c++) {
-                if (c == colITN || c == colLat || c == colLon) continue;
-                String h = headers.get(c);
-                if (h.isEmpty() || skipCols.contains(h.toUpperCase())) continue;
-                String val = getCellString(row.getCell(c)).trim();
-                if (!val.isEmpty() && !val.equals("0") && !val.equals(".")) {
-                    extra.put(h, val);
+                double lat = row.getCell(colLat).getNumericCellValue();
+                double lon = row.getCell(colLon).getNumericCellValue();
+                if (lat==0||lon==0) continue;
+                Map<String,String> extra = new HashMap<>();
+                for (int c=0;c<headers.size();c++) {
+                    if (c==colITN||c==colLat||c==colLon) continue;
+                    String h=headers.get(c);
+                    if (h.isEmpty()||skipList.contains(h.toUpperCase())) continue;
+                    String v=getCellString(row.getCell(c)).trim();
+                    if (!v.isEmpty()&&!v.equals("0")&&!v.equals(".")) extra.put(h,v);
                 }
-            }
-
-            newData.put(itn, new GpsRecord(itn, lat, lon, extra));
+                newData.put(itn, new GpsRecord(itn,lat,lon,extra));
+            } catch (Exception e) { /* skip */ }
         }
 
-        wb.close();
-        is.close();
-
-        final int count = newData.size();
+        final Map<String,GpsRecord> result = newData;
         final String fname = filename;
         runOnUiThread(() -> {
-            gpsData = newData;
+            gpsData = result;
             hideLoading();
-            statusText.setText(fname + ": " + String.format("%,d", count) + " записа");
-            Toast.makeText(this, "Заредени " + count + " клиента!", Toast.LENGTH_SHORT).show();
+            statusText.setText(fname+": "+String.format("%,d",result.size())+" записа");
+            Toast.makeText(this,"Заредени "+result.size()+" клиента!",Toast.LENGTH_SHORT).show();
         });
     }
 
