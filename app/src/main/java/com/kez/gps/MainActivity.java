@@ -259,7 +259,7 @@ public class MainActivity extends AppCompatActivity {
         try {
             // Стъпка 1: Зареди Shared Strings като ArrayList (не XSSFSharedStringsTable)
             runOnUiThread(() -> loadingText.setText("Зареждане на стрингове..."));
-            List<String> sharedStrings = loadSharedStrings(zip);
+            loadSharedStrings(zip); // зарежда в SQLite на диска
 
             // Стъпка 2: Намери sheet1
             java.util.zip.ZipEntry sheetEntry = zip.getEntry("xl/worksheets/sheet1.xml");
@@ -279,7 +279,7 @@ public class MainActivity extends AppCompatActivity {
             // Стъпка 3: Парсирай sheet с лек SAX handler
             runOnUiThread(() -> loadingText.setText("Четене на данните..."));
             InputStream sheetStream = zip.getInputStream(sheetEntry);
-            LightSheetHandler handler = new LightSheetHandler(sharedStrings, filename);
+            LightSheetHandler handler = new LightSheetHandler(filename);
             javax.xml.parsers.SAXParserFactory factory = javax.xml.parsers.SAXParserFactory.newInstance();
             factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", false);
             javax.xml.parsers.SAXParser parser = factory.newSAXParser();
@@ -291,43 +291,72 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // Зареди Shared Strings като прост ArrayList - само стрингове, минимална памет
-    private List<String> loadSharedStrings(java.util.zip.ZipFile zip) throws Exception {
-        List<String> result = new ArrayList<>();
-        java.util.zip.ZipEntry entry = zip.getEntry("xl/sharedStrings.xml");
-        if (entry == null) return result;
+    // SQLite база за Shared Strings на диска (не в RAM)
+    private android.database.sqlite.SQLiteDatabase ssDb = null;
+    private File ssDbFile = null;
 
+    private void openSsDb() throws Exception {
+        ssDbFile = File.createTempFile("kez_ss", ".db", getCacheDir());
+        ssDb = android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(ssDbFile, null);
+        ssDb.execSQL("CREATE TABLE IF NOT EXISTS ss (i INTEGER PRIMARY KEY, v TEXT)");
+        ssDb.execSQL("PRAGMA synchronous=OFF");
+        ssDb.execSQL("PRAGMA journal_mode=MEMORY");
+    }
+
+    private void closeSsDb() {
+        try { if (ssDb!=null) ssDb.close(); } catch (Exception e) {}
+        try { if (ssDbFile!=null) ssDbFile.delete(); } catch (Exception e) {}
+        ssDb = null; ssDbFile = null;
+    }
+
+    private String getSs(int idx) {
+        if (ssDb==null||!ssDb.isOpen()) return "";
+        try (android.database.Cursor c = ssDb.rawQuery(
+                "SELECT v FROM ss WHERE i=?", new String[]{String.valueOf(idx)})) {
+            return c.moveToFirst() ? c.getString(0) : "";
+        }
+    }
+
+    private List<String> loadSharedStrings(java.util.zip.ZipFile zip) throws Exception {
+        java.util.zip.ZipEntry entry = zip.getEntry("xl/sharedStrings.xml");
+        if (entry == null) return new ArrayList<>();
+
+        openSsDb();
         InputStream is = zip.getInputStream(entry);
         javax.xml.parsers.SAXParserFactory factory = javax.xml.parsers.SAXParserFactory.newInstance();
         javax.xml.parsers.SAXParser parser = factory.newSAXParser();
+        final int[] idx = {0};
 
-        parser.parse(is, new org.xml.sax.helpers.DefaultHandler() {
-            boolean inT = false;
-            StringBuilder sb = new StringBuilder();
-
-            @Override
-            public void startElement(String u, String l, String name, org.xml.sax.Attributes a) {
-                if ("t".equals(name)) { inT = true; sb.setLength(0); }
-                else if ("si".equals(name)) sb.setLength(0);
-            }
-
-            @Override
-            public void characters(char[] ch, int s, int len) {
-                if (inT) sb.append(ch, s, len);
-            }
-
-            @Override
-            public void endElement(String u, String l, String name) {
-                if ("t".equals(name)) inT = false;
-                else if ("si".equals(name)) result.add(sb.toString());
-            }
-        });
+        ssDb.beginTransaction();
+        try {
+            parser.parse(is, new org.xml.sax.helpers.DefaultHandler() {
+                boolean inT = false;
+                final StringBuilder sb = new StringBuilder();
+                final android.content.ContentValues cv = new android.content.ContentValues();
+                @Override public void startElement(String u, String l, String n, org.xml.sax.Attributes a) {
+                    if ("t".equals(n)) { inT=true; sb.setLength(0); }
+                    else if ("si".equals(n)) sb.setLength(0);
+                }
+                @Override public void characters(char[] ch, int s, int len) {
+                    if (inT) sb.append(ch, s, len);
+                }
+                @Override public void endElement(String u, String l, String n) {
+                    if ("t".equals(n)) inT=false;
+                    else if ("si".equals(n)) {
+                        cv.put("i", idx[0]++); cv.put("v", sb.toString());
+                        ssDb.insert("ss", null, cv);
+                    }
+                }
+            });
+            ssDb.setTransactionSuccessful();
+        } finally { ssDb.endTransaction(); }
         is.close();
-        return result;
+        // Върни null - сигнал че ползваме DB
+        return null;
     }
 
     // Лек SAX handler за sheet данните
     class LightSheetHandler extends org.xml.sax.helpers.DefaultHandler {
-        private final List<String> ss;
         private final String filename;
         private boolean inV = false, isStr = false;
         private StringBuilder val = new StringBuilder();
@@ -340,8 +369,8 @@ public class MainActivity extends AppCompatActivity {
         private int colIdx = 0;
         private final Map<String, GpsRecord> data = new HashMap<>();
 
-        LightSheetHandler(List<String> ss, String filename) {
-            this.ss = ss; this.filename = filename;
+        LightSheetHandler(String filename) {
+            this.filename = filename;
         }
 
         private int colLetterToIndex(String ref) {
@@ -377,7 +406,7 @@ public class MainActivity extends AppCompatActivity {
                 inV = false;
                 String v = val.toString();
                 if (isStr) {
-                    try { int i = Integer.parseInt(v); v = (i < ss.size()) ? ss.get(i) : ""; }
+                    try { v = getSs(Integer.parseInt(v)); }
                     catch (Exception e) { v = ""; }
                 }
                 while (curRow.size() <= colIdx) curRow.add("");
@@ -450,6 +479,7 @@ public class MainActivity extends AppCompatActivity {
 
         @Override
         public void endDocument() {
+            closeSsDb(); // затвори и изтрий temp DB
             final Map<String,GpsRecord> result = data;
             final String fname = filename;
             runOnUiThread(() -> {
