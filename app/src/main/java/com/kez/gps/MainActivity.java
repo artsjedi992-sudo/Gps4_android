@@ -450,8 +450,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        // ФИКСИРАНО: Разполучаване с всички възможни разделители
-        String[] parts = raw.split("[\\s,;.\n]+");
+        String[] parts = raw.split("[\\s,;.\\n]+");
         foundRecords.clear();
         List<String> notFound = new ArrayList<>();
 
@@ -491,13 +490,12 @@ public class MainActivity extends AppCompatActivity {
             marker.setSnippet(rec.getClient() + "\n" + rec.getPlace());
             marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM);
             
-            // Цвят маркер по индекс
-            marker.setTextIcon((char) ('A' + (i % 26)));
+            // ФИКСИРАНО: Преобразуване на char в String
+            marker.setTextIcon(String.valueOf((char) ('A' + (i % 26))));
             map.getOverlays().add(marker);
             markers.add(marker);
         }
 
-        // Линия между всички точки
         if (points.size() > 1) {
             routeLine = new Polyline();
             routeLine.setPoints(points);
