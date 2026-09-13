@@ -126,14 +126,14 @@ public class MainActivity extends AppCompatActivity {
     private void setMapType(boolean satellite) {
         usingSatellite = satellite;
         if (satellite) {
-            org.osmdroid.tileprovider.tilesource.XYTileSource googleSat =
+            // Bing Satellite - работи стабилно
+            org.osmdroid.tileprovider.tilesource.XYTileSource bingSat =
                 new org.osmdroid.tileprovider.tilesource.XYTileSource(
-                    "Google-Sat",
+                    "Bing-Sat",
                     0, 20, 256, ".png",
-                    new String[]{"https://mt0.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
-                                 "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"}
+                    new String[]{"https://ecn.t0.tiles.virtualearth.net/tiles/a{quadkey}.jpeg?g=11776"}
                 );
-            map.setTileSource(googleSat);
+            map.setTileSource(bingSat);
             btnSat.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.parseColor("#e94560")));
             btnSat.setTextColor(Color.WHITE);
             btnMap.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.parseColor("#0f3460")));
@@ -228,8 +228,6 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) { return false; }
     }
 
-    // ========== ГЛАВНА ОПТИМИЗАЦИЯ ==========
-    // Чете Shared Strings в HashMap - без SQLite
     private Map<Integer, String> sharedStrings = new HashMap<>();
     
     private void loadXlsxLightweight(File file, String filename) throws Exception {
@@ -237,10 +235,8 @@ public class MainActivity extends AppCompatActivity {
         try {
             runOnUiThread(() -> loadingText.setText("Четене на данните..."));
             
-            // Зареди Shared Strings за справка
             loadSharedStringsMap(zip);
             
-            // Намери sheet1
             java.util.zip.ZipEntry sheetEntry = zip.getEntry("xl/worksheets/sheet1.xml");
             if (sheetEntry == null) {
                 java.util.Enumeration<? extends java.util.zip.ZipEntry> entries = zip.entries();
@@ -254,21 +250,18 @@ public class MainActivity extends AppCompatActivity {
             }
             if (sheetEntry == null) throw new Exception("Не намирам лист в Excel файла");
             
-            // Парсирай sheet
             InputStream sheetStream = zip.getInputStream(sheetEntry);
             LightSheetHandler handler = new LightSheetHandler(filename);
             javax.xml.parsers.SAXParserFactory factory = javax.xml.parsers.SAXParserFactory.newInstance();
-            // БЕЗ DOCTYPE feature - не е нужна
             javax.xml.parsers.SAXParser parser = factory.newSAXParser();
             parser.parse(sheetStream, handler);
             sheetStream.close();
         } finally {
             zip.close();
-            sharedStrings.clear(); // Изтрий map след зареждане
+            sharedStrings.clear();
         }
     }
 
-    // Зареди Shared Strings като HashMap
     private void loadSharedStringsMap(java.util.zip.ZipFile zip) throws Exception {
         java.util.zip.ZipEntry entry = zip.getEntry("xl/sharedStrings.xml");
         if (entry == null) return;
@@ -295,7 +288,6 @@ public class MainActivity extends AppCompatActivity {
                 if ("t".equals(n)) inT=false;
                 else if ("si".equals(n)) {
                     sharedStrings.put(idx[0]++, sb.toString());
-                    // Progress всеки 10000 стрингове
                     if (idx[0] % 10000 == 0) {
                         final int count = idx[0];
                         runOnUiThread(() -> loadingText.setText("Стрингове: " + count + "..."));
@@ -306,7 +298,6 @@ public class MainActivity extends AppCompatActivity {
         is.close();
     }
 
-    // SAX handler за sheet данните
     class LightSheetHandler extends org.xml.sax.helpers.DefaultHandler {
         private final String filename;
         private boolean inV = false, isStr = false;
@@ -373,7 +364,6 @@ public class MainActivity extends AppCompatActivity {
         private void processRow() {
             if (curRow.isEmpty()) return;
 
-            // Намери header ред
             if (headerRow < 0) {
                 for (int c = 0; c < curRow.size(); c++) {
                     if ("ИТН".equalsIgnoreCase(curRow.get(c).trim())) {
@@ -392,7 +382,6 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
-            // Детектирай координатни колони по типични диапазони
             if ((colLat<0||colLon<0) && scanRows<10) {
                 for (int c=0; c<curRow.size() && c<latCnt.length; c++) {
                     try {
@@ -409,7 +398,6 @@ public class MainActivity extends AppCompatActivity {
 
             if (colITN<0||colLat<0||colLon<0) return;
 
-            // Извлеч данни
             String itn = colITN<curRow.size() ? curRow.get(colITN).trim().replaceAll("[^0-9]","") : "";
             if (itn.isEmpty()||itn.equals("0")) return;
             try {
@@ -462,7 +450,8 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        String[] parts = raw.split("[\\s,;\\n]+");
+        // ФИКСИРАНО: Разполучаване с всички възможни разделители
+        String[] parts = raw.split("[\\s,;.\n]+");
         foundRecords.clear();
         List<String> notFound = new ArrayList<>();
 
@@ -470,8 +459,16 @@ public class MainActivity extends AppCompatActivity {
             String itn = part.trim().replaceAll("[^0-9]", "");
             if (itn.isEmpty()) continue;
             GpsRecord rec = gpsData.get(itn);
-            if (rec != null) foundRecords.add(rec);
-            else notFound.add(itn);
+            if (rec != null) {
+                foundRecords.add(rec);
+            } else {
+                notFound.add(itn);
+            }
+        }
+
+        if (foundRecords.isEmpty()) {
+            Toast.makeText(this, "Не намерени ИТН номера!", Toast.LENGTH_SHORT).show();
+            return;
         }
 
         clearMarkers();
@@ -493,10 +490,14 @@ public class MainActivity extends AppCompatActivity {
             marker.setTitle("ИТН: " + rec.itn);
             marker.setSnippet(rec.getClient() + "\n" + rec.getPlace());
             marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM);
+            
+            // Цвят маркер по индекс
+            marker.setTextIcon((char) ('A' + (i % 26)));
             map.getOverlays().add(marker);
             markers.add(marker);
         }
 
+        // Линия между всички точки
         if (points.size() > 1) {
             routeLine = new Polyline();
             routeLine.setPoints(points);
