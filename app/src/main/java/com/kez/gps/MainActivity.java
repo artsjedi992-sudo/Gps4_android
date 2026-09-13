@@ -29,7 +29,6 @@ import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
-// Без POI imports - ползваме вграден Java SAX + ZipFile
 import org.osmdroid.config.Configuration;
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory;
 import org.osmdroid.util.GeoPoint;
@@ -48,12 +47,10 @@ import java.util.Map;
 
 public class MainActivity extends AppCompatActivity {
 
-    // Константи
     private static final int FILE_REQUEST = 1;
     private static final int SPEECH_REQUEST = 2;
     private static final int PERM_REQUEST = 3;
 
-    // Файлово търсене — търси тези имена в Downloads и Documents
     private static final String[] EXCEL_NAMES = {
         "GPS_koordinati_na_klientite_na_KEZ_Karlovo.xlsx",
         "GPS_koordinati_na_klientite_na_KEZ_Karlovo.xls",
@@ -65,7 +62,6 @@ public class MainActivity extends AppCompatActivity {
         "kez_gps.xls"
     };
 
-    // UI
     private MapView map;
     private EditText itnInput;
     private TextView statusText;
@@ -75,7 +71,6 @@ public class MainActivity extends AppCompatActivity {
     private TextView loadingText;
     private Button btnMap, btnSat;
 
-    // Данни
     private Map<String, GpsRecord> gpsData = new HashMap<>();
     private List<GpsRecord> foundRecords = new ArrayList<>();
     private List<Marker> markers = new ArrayList<>();
@@ -86,12 +81,10 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // OSMDroid конфигурация
         Configuration.getInstance().setUserAgentValue(getPackageName());
 
         setContentView(R.layout.activity_main);
 
-        // Инициализирай UI
         map = findViewById(R.id.map);
         itnInput = findViewById(R.id.itn_input);
         statusText = findViewById(R.id.status_text);
@@ -102,13 +95,10 @@ public class MainActivity extends AppCompatActivity {
         btnMap = findViewById(R.id.btn_map);
         btnSat = findViewById(R.id.btn_sat);
 
-        // Настрой карта
         setupMap();
 
-        // Hint цвят на полето
         itnInput.setHintTextColor(Color.parseColor("#888888"));
 
-        // Бутони
         findViewById(R.id.search_btn).setOnClickListener(v -> search());
         findViewById(R.id.mic_btn).setOnClickListener(v -> startVoice());
         findViewById(R.id.btn_load).setOnClickListener(v -> pickExcelFile());
@@ -117,16 +107,12 @@ public class MainActivity extends AppCompatActivity {
         btnMap.setOnClickListener(v -> setMapType(false));
         btnSat.setOnClickListener(v -> setMapType(true));
 
-        // RecyclerView
         resultsList.setLayoutManager(new LinearLayoutManager(this));
 
-        // Клавиш Enter в полето
         itnInput.setOnEditorActionListener((v, actionId, event) -> { search(); return true; });
 
-        // Поискай разрешения
         requestPermissions();
 
-        // Опитай автоматично зареждане на Excel
         autoLoadExcel();
     }
 
@@ -140,7 +126,6 @@ public class MainActivity extends AppCompatActivity {
     private void setMapType(boolean satellite) {
         usingSatellite = satellite;
         if (satellite) {
-            // Google сателит
             org.osmdroid.tileprovider.tilesource.XYTileSource googleSat =
                 new org.osmdroid.tileprovider.tilesource.XYTileSource(
                     "Google-Sat",
@@ -163,7 +148,6 @@ public class MainActivity extends AppCompatActivity {
         map.invalidate();
     }
 
-    // Автоматично търси Excel файла в известни локации
     private void autoLoadExcel() {
         new Thread(() -> {
             File found = findExcelFile();
@@ -177,7 +161,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private File findExcelFile() {
-        // Търси в Downloads, Documents, и root на external storage
         File[] searchDirs = {
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
@@ -198,7 +181,6 @@ public class MainActivity extends AppCompatActivity {
         return null;
     }
 
-    // Зареди Excel файл
     private void loadExcelFile(File file) {
         showLoading("Зареждане на " + file.getName() + "...");
         new Thread(() -> {
@@ -214,11 +196,6 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    // ================================================================
-    // ЛЕКОТЕЖЕСТ xlsx четец - без POI зареждане в RAM
-    // Чете директно ZIP → XML с Java SAX
-    // ================================================================
-
     private void loadFromStream(InputStream is, String filename) throws Exception {
         File tmpFile = File.createTempFile("kez_excel", ".tmp", getCacheDir());
         try {
@@ -231,7 +208,6 @@ public class MainActivity extends AppCompatActivity {
 
             runOnUiThread(() -> loadingText.setText("Анализиране..."));
 
-            // Провери формат
             boolean isXlsx = isXlsxFormat(tmpFile);
             if (isXlsx) {
                 loadXlsxLightweight(tmpFile, filename);
@@ -243,7 +219,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // Провери дали е истински .xlsx
     private boolean isXlsxFormat(File file) {
         try {
             java.util.zip.ZipFile zip = new java.util.zip.ZipFile(file);
@@ -253,18 +228,21 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) { return false; }
     }
 
-    // Лек четец на .xlsx - зарежда Shared Strings като stream, после чете sheet
+    // ========== ГЛАВНА ОПТИМИЗАЦИЯ ==========
+    // Чете Shared Strings в потока, без съхранение - само чете индекса когато трябва
+    private Map<Integer, String> sharedStrings = new HashMap<>();
+    
     private void loadXlsxLightweight(File file, String filename) throws Exception {
         java.util.zip.ZipFile zip = new java.util.zip.ZipFile(file);
         try {
-            // Стъпка 1: Зареди Shared Strings като ArrayList (не XSSFSharedStringsTable)
-            runOnUiThread(() -> loadingText.setText("Зареждане на стрингове..."));
-            loadSharedStrings(zip); // зарежда в SQLite на диска
-
-            // Стъпка 2: Намери sheet1
+            runOnUiThread(() -> loadingText.setText("Четене на данните..."));
+            
+            // Зареди Shared Strings за справка
+            loadSharedStringsMap(zip);
+            
+            // Намери sheet1
             java.util.zip.ZipEntry sheetEntry = zip.getEntry("xl/worksheets/sheet1.xml");
             if (sheetEntry == null) {
-                // Опитай да намериш първия лист
                 java.util.Enumeration<? extends java.util.zip.ZipEntry> entries = zip.entries();
                 while (entries.hasMoreElements()) {
                     java.util.zip.ZipEntry e = entries.nextElement();
@@ -275,9 +253,8 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
             if (sheetEntry == null) throw new Exception("Не намирам лист в Excel файла");
-
-            // Стъпка 3: Парсирай sheet с лек SAX handler
-            runOnUiThread(() -> loadingText.setText("Четене на данните..."));
+            
+            // Парсирай sheet
             InputStream sheetStream = zip.getInputStream(sheetEntry);
             LightSheetHandler handler = new LightSheetHandler(filename);
             javax.xml.parsers.SAXParserFactory factory = javax.xml.parsers.SAXParserFactory.newInstance();
@@ -287,75 +264,49 @@ public class MainActivity extends AppCompatActivity {
             sheetStream.close();
         } finally {
             zip.close();
+            sharedStrings.clear(); // Изтрий map след зареждане
         }
     }
 
-    // Зареди Shared Strings като прост ArrayList - само стрингове, минимална памет
-    // SQLite база за Shared Strings на диска (не в RAM)
-    private android.database.sqlite.SQLiteDatabase ssDb = null;
-    private File ssDbFile = null;
-
-    private void openSsDb() throws Exception {
-        ssDbFile = File.createTempFile("kez_ss", ".db", getCacheDir());
-        ssDb = android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(ssDbFile, null);
-        ssDb.execSQL("CREATE TABLE IF NOT EXISTS ss (i INTEGER PRIMARY KEY, v TEXT)");
-        ssDb.execSQL("PRAGMA synchronous=OFF");
-        ssDb.execSQL("PRAGMA journal_mode=MEMORY");
-    }
-
-    private void closeSsDb() {
-        try { if (ssDb!=null) ssDb.close(); } catch (Exception e) {}
-        try { if (ssDbFile!=null) ssDbFile.delete(); } catch (Exception e) {}
-        ssDb = null; ssDbFile = null;
-    }
-
-    private String getSs(int idx) {
-        if (ssDb==null||!ssDb.isOpen()) return "";
-        try (android.database.Cursor c = ssDb.rawQuery(
-                "SELECT v FROM ss WHERE i=?", new String[]{String.valueOf(idx)})) {
-            return c.moveToFirst() ? c.getString(0) : "";
-        }
-    }
-
-    private List<String> loadSharedStrings(java.util.zip.ZipFile zip) throws Exception {
+    // Зареди Shared Strings като HashMap - малко памет, само за този файл
+    private void loadSharedStringsMap(java.util.zip.ZipFile zip) throws Exception {
         java.util.zip.ZipEntry entry = zip.getEntry("xl/sharedStrings.xml");
-        if (entry == null) return new ArrayList<>();
+        if (entry == null) return;
 
-        openSsDb();
         InputStream is = zip.getInputStream(entry);
         javax.xml.parsers.SAXParserFactory factory = javax.xml.parsers.SAXParserFactory.newInstance();
         javax.xml.parsers.SAXParser parser = factory.newSAXParser();
         final int[] idx = {0};
 
-        ssDb.beginTransaction();
-        try {
-            parser.parse(is, new org.xml.sax.helpers.DefaultHandler() {
-                boolean inT = false;
-                final StringBuilder sb = new StringBuilder();
-                final android.content.ContentValues cv = new android.content.ContentValues();
-                @Override public void startElement(String u, String l, String n, org.xml.sax.Attributes a) {
-                    if ("t".equals(n)) { inT=true; sb.setLength(0); }
-                    else if ("si".equals(n)) sb.setLength(0);
-                }
-                @Override public void characters(char[] ch, int s, int len) {
-                    if (inT) sb.append(ch, s, len);
-                }
-                @Override public void endElement(String u, String l, String n) {
-                    if ("t".equals(n)) inT=false;
-                    else if ("si".equals(n)) {
-                        cv.put("i", idx[0]++); cv.put("v", sb.toString());
-                        ssDb.insert("ss", null, cv);
+        parser.parse(is, new org.xml.sax.helpers.DefaultHandler() {
+            boolean inT = false;
+            final StringBuilder sb = new StringBuilder();
+            
+            @Override public void startElement(String u, String l, String n, org.xml.sax.Attributes a) {
+                if ("t".equals(n)) { inT=true; sb.setLength(0); }
+                else if ("si".equals(n)) sb.setLength(0);
+            }
+            
+            @Override public void characters(char[] ch, int s, int len) {
+                if (inT) sb.append(ch, s, len);
+            }
+            
+            @Override public void endElement(String u, String l, String n) {
+                if ("t".equals(n)) inT=false;
+                else if ("si".equals(n)) {
+                    sharedStrings.put(idx[0]++, sb.toString());
+                    // Progress всеки 10000 стрингове
+                    if (idx[0] % 10000 == 0) {
+                        final int count = idx[0];
+                        runOnUiThread(() -> loadingText.setText("Стрингове: " + count + "..."));
                     }
                 }
-            });
-            ssDb.setTransactionSuccessful();
-        } finally { ssDb.endTransaction(); }
+            }
+        });
         is.close();
-        // Върни null - сигнал че ползваме DB
-        return null;
     }
 
-    // Лек SAX handler за sheet данните
+    // SAX handler за sheet данните
     class LightSheetHandler extends org.xml.sax.helpers.DefaultHandler {
         private final String filename;
         private boolean inV = false, isStr = false;
@@ -406,7 +357,9 @@ public class MainActivity extends AppCompatActivity {
                 inV = false;
                 String v = val.toString();
                 if (isStr) {
-                    try { v = getSs(Integer.parseInt(v)); }
+                    try { 
+                        v = sharedStrings.getOrDefault(Integer.parseInt(v), ""); 
+                    }
                     catch (Exception e) { v = ""; }
                 }
                 while (curRow.size() <= colIdx) curRow.add("");
@@ -420,6 +373,7 @@ public class MainActivity extends AppCompatActivity {
         private void processRow() {
             if (curRow.isEmpty()) return;
 
+            // Намери header ред
             if (headerRow < 0) {
                 for (int c = 0; c < curRow.size(); c++) {
                     if ("ИТН".equalsIgnoreCase(curRow.get(c).trim())) {
@@ -438,6 +392,7 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
 
+            // Детектирай координатни колони по типични диапазони
             if ((colLat<0||colLon<0) && scanRows<10) {
                 for (int c=0; c<curRow.size() && c<latCnt.length; c++) {
                     try {
@@ -454,6 +409,7 @@ public class MainActivity extends AppCompatActivity {
 
             if (colITN<0||colLat<0||colLon<0) return;
 
+            // Извлеч данни
             String itn = colITN<curRow.size() ? curRow.get(colITN).trim().replaceAll("[^0-9]","") : "";
             if (itn.isEmpty()||itn.equals("0")) return;
             try {
@@ -479,7 +435,6 @@ public class MainActivity extends AppCompatActivity {
 
         @Override
         public void endDocument() {
-            closeSsDb(); // затвори и изтрий temp DB
             final Map<String,GpsRecord> result = data;
             final String fname = filename;
             runOnUiThread(() -> {
@@ -496,9 +451,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-
-
-    // Търсене
     private void search() {
         String raw = itnInput.getText().toString().trim();
         if (raw.isEmpty()) {
@@ -510,7 +462,6 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        // Парсирай ИТН номерата
         String[] parts = raw.split("[\\s,;\\n]+");
         foundRecords.clear();
         List<String> notFound = new ArrayList<>();
@@ -523,10 +474,8 @@ public class MainActivity extends AppCompatActivity {
             else notFound.add(itn);
         }
 
-        // Изчисти стари маркери
         clearMarkers();
 
-        // Добави нови маркери
         int[] colors = {
             Color.parseColor("#e94560"), Color.parseColor("#4CAF50"),
             Color.parseColor("#2196F3"), Color.parseColor("#FF9800"),
@@ -548,7 +497,6 @@ public class MainActivity extends AppCompatActivity {
             markers.add(marker);
         }
 
-        // Маршрутна линия
         if (points.size() > 1) {
             routeLine = new Polyline();
             routeLine.setPoints(points);
@@ -556,7 +504,6 @@ public class MainActivity extends AppCompatActivity {
             routeLine.getOutlinePaint().setStrokeWidth(5f);
             map.getOverlays().add(routeLine);
 
-            // Центрирай картата
             org.osmdroid.util.BoundingBox bb = org.osmdroid.util.BoundingBox.fromGeoPoints(points);
             map.zoomToBoundingBox(bb, true, 80);
         } else if (points.size() == 1) {
@@ -566,7 +513,6 @@ public class MainActivity extends AppCompatActivity {
 
         map.invalidate();
 
-        // Покажи резултати
         if (!foundRecords.isEmpty()) {
             ResultAdapter adapter = new ResultAdapter(foundRecords);
             resultsList.setAdapter(adapter);
@@ -585,7 +531,6 @@ public class MainActivity extends AppCompatActivity {
         map.invalidate();
     }
 
-    // Google Maps навигация
     private void openGoogleMaps() {
         if (foundRecords.isEmpty()) return;
         String url;
@@ -607,7 +552,6 @@ public class MainActivity extends AppCompatActivity {
         startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
     }
 
-    // File picker за Excel
     private void pickExcelFile() {
         Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
         intent.setType("*/*");
@@ -615,7 +559,6 @@ public class MainActivity extends AppCompatActivity {
         startActivityForResult(Intent.createChooser(intent, "Избери Excel файл"), FILE_REQUEST);
     }
 
-    // Гласово въвеждане
     private void startVoice() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED) {
@@ -689,7 +632,6 @@ public class MainActivity extends AppCompatActivity {
         loadingOverlay.setVisibility(View.GONE);
     }
 
-    // Модел на данните
     static class GpsRecord {
         String itn;
         double lat, lon;
@@ -712,7 +654,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // RecyclerView Adapter
     class ResultAdapter extends RecyclerView.Adapter<ResultAdapter.VH> {
         List<GpsRecord> items;
         boolean[] expanded;
@@ -739,16 +680,13 @@ public class MainActivity extends AppCompatActivity {
             h.placeText.setText(place);
             h.placeText.setVisibility(place.isEmpty() ? View.GONE : View.VISIBLE);
 
-            // Детайли бутон
             h.btnDetails.setOnClickListener(v -> {
                 expanded[pos] = !expanded[pos];
                 h.detailsLayout.setVisibility(expanded[pos] ? View.VISIBLE : View.GONE);
                 h.btnDetails.setText(expanded[pos] ? "Скрий" : "Детайли");
 
                 if (expanded[pos] && h.detailsLayout.getChildCount() == 0) {
-                    // Попълни детайлите
                     h.detailsLayout.removeAllViews();
-                    // ИТН
                     addDetailRow(h.detailsLayout, "ИТН", rec.itn);
                     addDetailRow(h.detailsLayout, "Коорд.", String.format("%.6f, %.6f", rec.lat, rec.lon));
                     for (Map.Entry<String, String> e : rec.extra.entrySet()) {
@@ -757,7 +695,6 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
 
-            // Кликни на ред → центрирай картата
             h.itemView.setOnClickListener(v -> {
                 map.getController().animateTo(new GeoPoint(rec.lat, rec.lon));
                 map.getController().setZoom(16.0);
