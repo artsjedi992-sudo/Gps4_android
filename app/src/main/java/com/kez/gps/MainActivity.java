@@ -229,7 +229,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ========== ГЛАВНА ОПТИМИЗАЦИЯ ==========
-    // Чете Shared Strings в потока, без съхранение - само чете индекса когато трябва
+    // Чете Shared Strings в HashMap - без SQLite
     private Map<Integer, String> sharedStrings = new HashMap<>();
     
     private void loadXlsxLightweight(File file, String filename) throws Exception {
@@ -258,7 +258,7 @@ public class MainActivity extends AppCompatActivity {
             InputStream sheetStream = zip.getInputStream(sheetEntry);
             LightSheetHandler handler = new LightSheetHandler(filename);
             javax.xml.parsers.SAXParserFactory factory = javax.xml.parsers.SAXParserFactory.newInstance();
-            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", false);
+            // БЕЗ DOCTYPE feature - не е нужна
             javax.xml.parsers.SAXParser parser = factory.newSAXParser();
             parser.parse(sheetStream, handler);
             sheetStream.close();
@@ -268,7 +268,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // Зареди Shared Strings като HashMap - малко памет, само за този файл
+    // Зареди Shared Strings като HashMap
     private void loadSharedStringsMap(java.util.zip.ZipFile zip) throws Exception {
         java.util.zip.ZipEntry entry = zip.getEntry("xl/sharedStrings.xml");
         if (entry == null) return;
