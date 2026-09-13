@@ -126,11 +126,11 @@ public class MainActivity extends AppCompatActivity {
     private void setMapType(boolean satellite) {
         usingSatellite = satellite;
         if (satellite) {
-            // Bing Satellite - работи стабилно
+            // Bing Satellite - JPEG не PNG
             org.osmdroid.tileprovider.tilesource.XYTileSource bingSat =
                 new org.osmdroid.tileprovider.tilesource.XYTileSource(
                     "Bing-Sat",
-                    0, 20, 256, ".png",
+                    0, 20, 256, ".jpeg",
                     new String[]{"https://ecn.t0.tiles.virtualearth.net/tiles/a{quadkey}.jpeg?g=11776"}
                 );
             map.setTileSource(bingSat);
@@ -450,7 +450,8 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        String[] parts = raw.split("[\\s,;.\\n]+");
+        // ФИКСИРАНО: Правилен regex за всички разделители
+        String[] parts = raw.split("[\\s,;.\\n\\/\\-]+");
         foundRecords.clear();
         List<String> notFound = new ArrayList<>();
 
@@ -490,12 +491,13 @@ public class MainActivity extends AppCompatActivity {
             marker.setSnippet(rec.getClient() + "\n" + rec.getPlace());
             marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM);
             
-            // ФИКСИРАНО: Преобразуване на char в String
+            // Номериране A, B, C...
             marker.setTextIcon(String.valueOf((char) ('A' + (i % 26))));
             map.getOverlays().add(marker);
             markers.add(marker);
         }
 
+        // Линия между всички маркери
         if (points.size() > 1) {
             routeLine = new Polyline();
             routeLine.setPoints(points);
