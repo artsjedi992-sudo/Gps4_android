@@ -126,7 +126,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:gravity="space_between">
+            android:layout_weight="1">
 
             <TextView
                 android:layout_width="wrap_content"
