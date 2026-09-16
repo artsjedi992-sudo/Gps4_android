@@ -126,14 +126,19 @@ public class MainActivity extends AppCompatActivity {
     private void setMapType(boolean satellite) {
         usingSatellite = satellite;
         if (satellite) {
-            // Bing Satellite - JPEG не PNG
-            org.osmdroid.tileprovider.tilesource.XYTileSource bingSat =
+            // Google Satellite
+            org.osmdroid.tileprovider.tilesource.XYTileSource googleSat =
                 new org.osmdroid.tileprovider.tilesource.XYTileSource(
-                    "Bing-Sat",
-                    0, 20, 256, ".jpeg",
-                    new String[]{"https://ecn.t0.tiles.virtualearth.net/tiles/a{quadkey}.jpeg?g=11776"}
+                    "GoogleSat",
+                    0, 20, 256, ".png",
+                    new String[]{
+                        "https://mt0.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+                        "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+                        "https://mt2.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+                        "https://mt3.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"
+                    }
                 );
-            map.setTileSource(bingSat);
+            map.setTileSource(googleSat);
             btnSat.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.parseColor("#e94560")));
             btnSat.setTextColor(Color.WHITE);
             btnMap.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.parseColor("#0f3460")));
@@ -491,8 +496,18 @@ public class MainActivity extends AppCompatActivity {
             marker.setSnippet(rec.getClient() + "\n" + rec.getPlace());
             marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM);
             
-            // Номериране A, B, C...
-            marker.setTextIcon(String.valueOf((char) ('A' + (i % 26))));
+            // Numbered marker with custom bitmap
+            android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(60, 60, android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas canvas = new android.graphics.Canvas(bmp);
+            android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+            paint.setColor(colors[i % colors.length]);
+            canvas.drawCircle(30, 30, 28, paint);
+            paint.setColor(Color.WHITE);
+            paint.setTextSize(22f);
+            paint.setTextAlign(android.graphics.Paint.Align.CENTER);
+            paint.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            canvas.drawText(String.valueOf(i + 1), 30, 38, paint);
+            marker.setIcon(new android.graphics.drawable.BitmapDrawable(getResources(), bmp));
             map.getOverlays().add(marker);
             markers.add(marker);
         }
