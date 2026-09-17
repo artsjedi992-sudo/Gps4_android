@@ -126,17 +126,19 @@ public class MainActivity extends AppCompatActivity {
     private void setMapType(boolean satellite) {
         usingSatellite = satellite;
         if (satellite) {
-            // Esri World Imagery - надежден сателитен слой без ограничения
-            org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase esriSat =
+            // Esri World Imagery
+            org.osmdroid.tileprovider.tilesource.XYTileSource esriSat =
                 new org.osmdroid.tileprovider.tilesource.XYTileSource(
                     "Esri.WorldImagery",
                     0, 19, 256, ".jpg",
                     new String[]{
                         "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
                     },
-                    "© Esri, © OpenStreetMap contributors"
+                    "Esri"
                 );
             map.setTileSource(esriSat);
+            map.invalidate();
+            Toast.makeText(this, "Сателит: ESRI зареден", Toast.LENGTH_SHORT).show();
             btnSat.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.parseColor("#e94560")));
             btnSat.setTextColor(Color.WHITE);
             btnMap.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.parseColor("#0f3460")));
@@ -534,7 +536,9 @@ public class MainActivity extends AppCompatActivity {
 
         String msg = "Намерени: " + toShow.size();
         if (!nf.isEmpty()) msg += " | Ненамерени: " + nf.size();
+        msg += " | Маркери: " + markers.size();
         statusText.setText(msg);
+        Toast.makeText(this, "Готово: " + toShow.size() + " точки нанесени", Toast.LENGTH_SHORT).show();
     }
 
     private void clearMarkers() {
