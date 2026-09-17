@@ -126,19 +126,8 @@ public class MainActivity extends AppCompatActivity {
     private void setMapType(boolean satellite) {
         usingSatellite = satellite;
         if (satellite) {
-            // Google Satellite
-            org.osmdroid.tileprovider.tilesource.XYTileSource googleSat =
-                new org.osmdroid.tileprovider.tilesource.XYTileSource(
-                    "GoogleSat",
-                    0, 20, 256, ".png",
-                    new String[]{
-                        "https://mt0.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
-                        "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
-                        "https://mt2.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
-                        "https://mt3.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"
-                    }
-                );
-            map.setTileSource(googleSat);
+            // Google Satellite - използва USGS тоест без ограничения
+            map.setTileSource(org.osmdroid.tileprovider.tilesource.TileSourceFactory.USGS_SAT);
             btnSat.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.parseColor("#e94560")));
             btnSat.setTextColor(Color.WHITE);
             btnMap.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.parseColor("#0f3460")));
@@ -455,7 +444,6 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        // ФИКСИРАНО: Правилен regex за всички разделители
         String[] parts = raw.split("[\\s,;.\\n\\/\\-]+");
         foundRecords.clear();
         List<String> notFound = new ArrayList<>();
@@ -478,66 +466,78 @@ public class MainActivity extends AppCompatActivity {
 
         clearMarkers();
 
-        int[] colors = {
-            Color.parseColor("#e94560"), Color.parseColor("#4CAF50"),
-            Color.parseColor("#2196F3"), Color.parseColor("#FF9800"),
-            Color.parseColor("#9C27B0"), Color.parseColor("#00BCD4")
-        };
+        // Рисуване на маркери и карта в background за да не блокира UI
+        final List<GpsRecord> toShow = new ArrayList<>(foundRecords);
+        new Thread(() -> {
+            int[] colors = {
+                Color.parseColor("#e94560"), Color.parseColor("#4CAF50"),
+                Color.parseColor("#2196F3"), Color.parseColor("#FF9800"),
+                Color.parseColor("#9C27B0"), Color.parseColor("#00BCD4")
+            };
 
-        List<GeoPoint> points = new ArrayList<>();
-        for (int i = 0; i < foundRecords.size(); i++) {
-            GpsRecord rec = foundRecords.get(i);
-            GeoPoint point = new GeoPoint(rec.lat, rec.lon);
-            points.add(point);
+            List<GeoPoint> points = new ArrayList<>();
+            List<Marker> newMarkers = new ArrayList<>();
 
-            Marker marker = new Marker(map);
-            marker.setPosition(point);
-            marker.setTitle("ИТН: " + rec.itn);
-            marker.setSnippet(rec.getClient() + "\n" + rec.getPlace());
-            marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM);
-            
-            // Numbered marker with custom bitmap
-            android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(60, 60, android.graphics.Bitmap.Config.ARGB_8888);
-            android.graphics.Canvas canvas = new android.graphics.Canvas(bmp);
-            android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
-            paint.setColor(colors[i % colors.length]);
-            canvas.drawCircle(30, 30, 28, paint);
-            paint.setColor(Color.WHITE);
-            paint.setTextSize(22f);
-            paint.setTextAlign(android.graphics.Paint.Align.CENTER);
-            paint.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-            canvas.drawText(String.valueOf(i + 1), 30, 38, paint);
-            marker.setIcon(new android.graphics.drawable.BitmapDrawable(getResources(), bmp));
-            map.getOverlays().add(marker);
-            markers.add(marker);
-        }
+            for (int i = 0; i < toShow.size(); i++) {
+                GpsRecord rec = toShow.get(i);
+                GeoPoint point = new GeoPoint(rec.lat, rec.lon);
+                points.add(point);
 
-        // Линия между всички маркери
-        if (points.size() > 1) {
-            routeLine = new Polyline();
-            routeLine.setPoints(points);
-            routeLine.getOutlinePaint().setColor(Color.parseColor("#e94560"));
-            routeLine.getOutlinePaint().setStrokeWidth(5f);
-            map.getOverlays().add(routeLine);
+                // Създай bitmap маркер - може да се прави в background
+                android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(60, 60, android.graphics.Bitmap.Config.ARGB_8888);
+                android.graphics.Canvas canvas = new android.graphics.Canvas(bmp);
+                android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+                paint.setColor(colors[i % colors.length]);
+                canvas.drawCircle(30, 30, 28, paint);
+                paint.setColor(Color.WHITE);
+                paint.setTextSize(22f);
+                paint.setTextAlign(android.graphics.Paint.Align.CENTER);
+                paint.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                canvas.drawText(String.valueOf(i + 1), 30, 38, paint);
+                final android.graphics.Bitmap finalBmp = bmp;
+                final int fi = i;
+                final GeoPoint fp = point;
+                final GpsRecord frec = rec;
 
-            org.osmdroid.util.BoundingBox bb = org.osmdroid.util.BoundingBox.fromGeoPoints(points);
-            map.zoomToBoundingBox(bb, true, 80);
-        } else if (points.size() == 1) {
-            map.getController().animateTo(points.get(0));
-            map.getController().setZoom(16.0);
-        }
+                // Маркерите трябва да се добавят на UI нишката
+                runOnUiThread(() -> {
+                    Marker marker = new Marker(map);
+                    marker.setPosition(fp);
+                    marker.setTitle("ИТН: " + frec.itn);
+                    marker.setSnippet(frec.getClient() + "\n" + frec.getPlace());
+                    marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM);
+                    marker.setIcon(new android.graphics.drawable.BitmapDrawable(getResources(), finalBmp));
+                    map.getOverlays().add(marker);
+                    markers.add(marker);
+                });
+            }
 
-        map.invalidate();
+            final List<GeoPoint> finalPoints = points;
+            runOnUiThread(() -> {
+                // Линия между точките
+                if (finalPoints.size() > 1) {
+                    routeLine = new Polyline();
+                    routeLine.setPoints(finalPoints);
+                    routeLine.getOutlinePaint().setColor(Color.parseColor("#e94560"));
+                    routeLine.getOutlinePaint().setStrokeWidth(5f);
+                    map.getOverlays().add(routeLine);
+                    org.osmdroid.util.BoundingBox bb = org.osmdroid.util.BoundingBox.fromGeoPoints(finalPoints);
+                    map.post(() -> map.zoomToBoundingBox(bb, false, 100));
+                } else if (finalPoints.size() == 1) {
+                    map.getController().animateTo(finalPoints.get(0));
+                    map.getController().setZoom(16.0);
+                }
+                map.invalidate();
 
-        if (!foundRecords.isEmpty()) {
-            ResultAdapter adapter = new ResultAdapter(foundRecords);
-            resultsList.setAdapter(adapter);
-            resultsPanel.setVisibility(View.VISIBLE);
-        }
+                ResultAdapter adapter = new ResultAdapter(toShow);
+                resultsList.setAdapter(adapter);
+                resultsPanel.setVisibility(View.VISIBLE);
 
-        String msg = "Намерени: " + foundRecords.size();
-        if (!notFound.isEmpty()) msg += " | Ненамерени: " + notFound.size();
-        statusText.setText(msg);
+                String msg = "Намерени: " + toShow.size();
+                if (!notFound.isEmpty()) msg += " | Ненамерени: " + notFound.size();
+                statusText.setText(msg);
+            });
+        }).start();
     }
 
     private void clearMarkers() {
