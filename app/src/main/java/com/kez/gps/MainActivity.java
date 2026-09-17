@@ -126,8 +126,17 @@ public class MainActivity extends AppCompatActivity {
     private void setMapType(boolean satellite) {
         usingSatellite = satellite;
         if (satellite) {
-            // Google Satellite - използва USGS тоест без ограничения
-            map.setTileSource(org.osmdroid.tileprovider.tilesource.TileSourceFactory.USGS_SAT);
+            // Esri World Imagery - надежден сателитен слой без ограничения
+            org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase esriSat =
+                new org.osmdroid.tileprovider.tilesource.XYTileSource(
+                    "Esri.WorldImagery",
+                    0, 19, 256, ".jpg",
+                    new String[]{
+                        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                    },
+                    "© Esri, © OpenStreetMap contributors"
+                );
+            map.setTileSource(esriSat);
             btnSat.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.parseColor("#e94560")));
             btnSat.setTextColor(Color.WHITE);
             btnMap.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.parseColor("#0f3460")));
@@ -466,78 +475,66 @@ public class MainActivity extends AppCompatActivity {
 
         clearMarkers();
 
-        // Рисуване на маркери и карта в background за да не блокира UI
+        // Всичко в един runOnUiThread - прост и надежден подход
         final List<GpsRecord> toShow = new ArrayList<>(foundRecords);
-        new Thread(() -> {
-            int[] colors = {
-                Color.parseColor("#e94560"), Color.parseColor("#4CAF50"),
-                Color.parseColor("#2196F3"), Color.parseColor("#FF9800"),
-                Color.parseColor("#9C27B0"), Color.parseColor("#00BCD4")
-            };
+        final List<String> nf = new ArrayList<>(notFound);
 
-            List<GeoPoint> points = new ArrayList<>();
-            List<Marker> newMarkers = new ArrayList<>();
+        int[] colors = {
+            Color.parseColor("#e94560"), Color.parseColor("#4CAF50"),
+            Color.parseColor("#2196F3"), Color.parseColor("#FF9800"),
+            Color.parseColor("#9C27B0"), Color.parseColor("#00BCD4")
+        };
 
-            for (int i = 0; i < toShow.size(); i++) {
-                GpsRecord rec = toShow.get(i);
-                GeoPoint point = new GeoPoint(rec.lat, rec.lon);
-                points.add(point);
+        // Подготви всички bitmap-и предварително (може в UI нишката - са малки)
+        List<GeoPoint> points = new ArrayList<>();
 
-                // Създай bitmap маркер - може да се прави в background
-                android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(60, 60, android.graphics.Bitmap.Config.ARGB_8888);
-                android.graphics.Canvas canvas = new android.graphics.Canvas(bmp);
-                android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
-                paint.setColor(colors[i % colors.length]);
-                canvas.drawCircle(30, 30, 28, paint);
-                paint.setColor(Color.WHITE);
-                paint.setTextSize(22f);
-                paint.setTextAlign(android.graphics.Paint.Align.CENTER);
-                paint.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-                canvas.drawText(String.valueOf(i + 1), 30, 38, paint);
-                final android.graphics.Bitmap finalBmp = bmp;
-                final int fi = i;
-                final GeoPoint fp = point;
-                final GpsRecord frec = rec;
+        for (int i = 0; i < toShow.size(); i++) {
+            GpsRecord rec = toShow.get(i);
+            GeoPoint point = new GeoPoint(rec.lat, rec.lon);
+            points.add(point);
 
-                // Маркерите трябва да се добавят на UI нишката
-                runOnUiThread(() -> {
-                    Marker marker = new Marker(map);
-                    marker.setPosition(fp);
-                    marker.setTitle("ИТН: " + frec.itn);
-                    marker.setSnippet(frec.getClient() + "\n" + frec.getPlace());
-                    marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM);
-                    marker.setIcon(new android.graphics.drawable.BitmapDrawable(getResources(), finalBmp));
-                    map.getOverlays().add(marker);
-                    markers.add(marker);
-                });
-            }
+            android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(60, 60, android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas cv = new android.graphics.Canvas(bmp);
+            android.graphics.Paint pt = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+            pt.setColor(colors[i % colors.length]);
+            cv.drawCircle(30, 30, 28, pt);
+            pt.setColor(Color.WHITE);
+            pt.setTextSize(22f);
+            pt.setTextAlign(android.graphics.Paint.Align.CENTER);
+            pt.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            cv.drawText(String.valueOf(i + 1), 30, 38, pt);
 
-            final List<GeoPoint> finalPoints = points;
-            runOnUiThread(() -> {
-                // Линия между точките
-                if (finalPoints.size() > 1) {
-                    routeLine = new Polyline();
-                    routeLine.setPoints(finalPoints);
-                    routeLine.getOutlinePaint().setColor(Color.parseColor("#e94560"));
-                    routeLine.getOutlinePaint().setStrokeWidth(5f);
-                    map.getOverlays().add(routeLine);
-                    org.osmdroid.util.BoundingBox bb = org.osmdroid.util.BoundingBox.fromGeoPoints(finalPoints);
-                    map.post(() -> map.zoomToBoundingBox(bb, false, 100));
-                } else if (finalPoints.size() == 1) {
-                    map.getController().animateTo(finalPoints.get(0));
-                    map.getController().setZoom(16.0);
-                }
-                map.invalidate();
+            Marker marker = new Marker(map);
+            marker.setPosition(point);
+            marker.setTitle("ИТН: " + rec.itn);
+            marker.setSnippet(rec.getClient() + "\n" + rec.getPlace());
+            marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM);
+            marker.setIcon(new android.graphics.drawable.BitmapDrawable(getResources(), bmp));
+            map.getOverlays().add(marker);
+            markers.add(marker);
+        }
 
-                ResultAdapter adapter = new ResultAdapter(toShow);
-                resultsList.setAdapter(adapter);
-                resultsPanel.setVisibility(View.VISIBLE);
+        // Линия и zoom
+        if (points.size() > 1) {
+            routeLine = new Polyline();
+            routeLine.setPoints(points);
+            routeLine.getOutlinePaint().setColor(Color.parseColor("#e94560"));
+            routeLine.getOutlinePaint().setStrokeWidth(5f);
+            map.getOverlays().add(routeLine);
+            final org.osmdroid.util.BoundingBox bb = org.osmdroid.util.BoundingBox.fromGeoPoints(points);
+            map.post(() -> map.zoomToBoundingBox(bb, false, 150));
+        } else if (points.size() == 1) {
+            map.getController().animateTo(points.get(0));
+            map.getController().setZoom(16.0);
+        }
+        map.invalidate();
 
-                String msg = "Намерени: " + toShow.size();
-                if (!notFound.isEmpty()) msg += " | Ненамерени: " + notFound.size();
-                statusText.setText(msg);
-            });
-        }).start();
+        resultsList.setAdapter(new ResultAdapter(toShow));
+        resultsPanel.setVisibility(View.VISIBLE);
+
+        String msg = "Намерени: " + toShow.size();
+        if (!nf.isEmpty()) msg += " | Ненамерени: " + nf.size();
+        statusText.setText(msg);
     }
 
     private void clearMarkers() {
