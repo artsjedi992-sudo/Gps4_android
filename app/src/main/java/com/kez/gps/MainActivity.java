@@ -779,31 +779,40 @@ public class MainActivity extends AppCompatActivity {
     private java.io.File logFile;
     private void initLog() {
         try {
-            // Използвай вътрешна памет - винаги достъпна
-            logFile = new java.io.File(getFilesDir(), "kez_debug.txt");
-            // Изчисти стария лог при старт
+            // Опитай всички възможни пътища
+            java.io.File dir = getFilesDir();
+            if (dir == null) dir = getCacheDir();
+            if (dir == null) dir = new java.io.File("/data/data/com.kez.gps");
+            dir.mkdirs();
+            logFile = new java.io.File(dir, "kez_debug.txt");
             if (logFile.exists()) logFile.delete();
-            log("=== СТАРТ " + new java.util.Date().toString() + " ===");
+            logFile.createNewFile();
+            log("=== СТАРТ ===");
             log("Android: " + android.os.Build.VERSION.RELEASE);
             log("Устройство: " + android.os.Build.MODEL);
-            log("Лог файл: " + logFile.getAbsolutePath());
-        } catch (Exception e) {
-            android.util.Log.e("KEZ_GPS", "initLog грешка: " + e.getMessage());
+            log("Лог: " + logFile.getAbsolutePath());
+            log("Съществува: " + logFile.exists());
+            // Покажи пътя на екрана при старт
+            android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+            h.postDelayed(() -> Toast.makeText(this,
+                "Лог: " + logFile.getAbsolutePath(), Toast.LENGTH_LONG).show(), 1500);
+        } catch (Throwable t) {
+            android.util.Log.e("KEZ_GPS", "initLog FATAL: " + t);
+            logFile = null;
         }
     }
 
     private synchronized void log(String msg) {
+        android.util.Log.d("KEZ_GPS", msg);
         try {
-            String line = new java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.getDefault())
-                .format(new java.util.Date()) + " " + msg + "\n";
-            android.util.Log.d("KEZ_GPS", msg);
             if (logFile == null) return;
-            java.io.FileOutputStream fos = new java.io.FileOutputStream(logFile, true);
-            fos.write(line.getBytes("UTF-8"));
-            fos.flush();
-            fos.close();
-        } catch (Exception e) {
-            android.util.Log.e("KEZ_GPS", "log грешка: " + e.getMessage());
+            java.io.PrintWriter pw = new java.io.PrintWriter(
+                new java.io.BufferedWriter(new java.io.FileWriter(logFile, true)));
+            pw.println(android.os.SystemClock.elapsedRealtime() + "ms " + msg);
+            pw.flush();
+            pw.close();
+        } catch (Throwable t) {
+            android.util.Log.e("KEZ_GPS", "log ERR: " + t);
         }
     }
 
