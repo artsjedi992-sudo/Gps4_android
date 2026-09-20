@@ -102,6 +102,7 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.search_btn).setOnClickListener(v -> search());
         findViewById(R.id.mic_btn).setOnClickListener(v -> startVoice());
         findViewById(R.id.btn_load).setOnClickListener(v -> pickExcelFile());
+        findViewById(R.id.btn_load).setOnLongClickListener(v -> { shareLog(); return true; });
         findViewById(R.id.btn_gmaps).setOnClickListener(v -> openGoogleMaps());
         findViewById(R.id.btn_close).setOnClickListener(v -> resultsPanel.setVisibility(View.GONE));
         btnMap.setOnClickListener(v -> setMapType(false));
@@ -124,6 +125,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setMapType(boolean satellite) {
+        log("setMapType: satellite=" + satellite);
         usingSatellite = satellite;
         if (satellite) {
             // Esri World Imagery
@@ -136,6 +138,7 @@ public class MainActivity extends AppCompatActivity {
                     },
                     "Esri"
                 );
+            log("Tile source: ESRI сателит");
             map.setTileSource(esriSat);
             map.invalidate();
             Toast.makeText(this, "Сателит: ESRI зареден", Toast.LENGTH_SHORT).show();
@@ -445,6 +448,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void search() {
+        log("search() старт");
         String raw = itnInput.getText().toString().trim();
         if (raw.isEmpty()) {
             Toast.makeText(this, "Въведи ИТН номер!", Toast.LENGTH_SHORT).show();
@@ -456,6 +460,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         String[] parts = raw.split("[\\s,;.\\n\\/\\-]+");
+        log("Търся в " + gpsData.size() + " записа");
         foundRecords.clear();
         List<String> notFound = new ArrayList<>();
 
@@ -470,11 +475,13 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
+        log("Намерени: " + foundRecords.size() + " | Ненамерени: " + notFound.size());
         if (foundRecords.isEmpty()) {
             Toast.makeText(this, "Не намерени ИТН номера!", Toast.LENGTH_SHORT).show();
             return;
         }
 
+        log("clearMarkers()");
         clearMarkers();
 
         // Всичко в един runOnUiThread - прост и надежден подход
@@ -488,6 +495,7 @@ public class MainActivity extends AppCompatActivity {
         };
 
         // Подготви всички bitmap-и предварително (може в UI нишката - са малки)
+        log("Почвам рисуване на " + toShow.size() + " маркера");
         List<GeoPoint> points = new ArrayList<>();
 
         for (int i = 0; i < toShow.size(); i++) {
@@ -529,6 +537,7 @@ public class MainActivity extends AppCompatActivity {
             map.getController().animateTo(points.get(0));
             map.getController().setZoom(16.0);
         }
+        log("map.invalidate()");
         map.invalidate();
 
         resultsList.setAdapter(new ResultAdapter(toShow));
@@ -538,6 +547,7 @@ public class MainActivity extends AppCompatActivity {
         if (!nf.isEmpty()) msg += " | Ненамерени: " + nf.size();
         msg += " | Маркери: " + markers.size();
         statusText.setText(msg);
+        log("search() завършено. Маркери: " + markers.size());
         Toast.makeText(this, "Готово: " + toShow.size() + " точки нанесени", Toast.LENGTH_SHORT).show();
     }
 
@@ -760,4 +770,44 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public void onPause() { super.onPause(); map.onPause(); }
+
+    // ── Лог в файл ────────────────────────────────────────────────────
+    private java.io.File logFile;
+    private void initLog() {
+        try {
+            logFile = new java.io.File(getExternalFilesDir(null), "kez_debug.txt");
+            log("=== СТАРТ НА ПРИЛОЖЕНИЕТО ===");
+        } catch (Exception e) { logFile = null; }
+    }
+    private void log(String msg) {
+        try {
+            if (logFile == null) return;
+            String line = new java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.getDefault())
+                .format(new java.util.Date()) + " " + msg + "\n";
+            java.io.FileWriter fw = new java.io.FileWriter(logFile, true);
+            fw.write(line);
+            fw.close();
+            android.util.Log.d("KEZ_GPS", msg);
+        } catch (Exception e) { /* ignore */ }
+    }
+    private void shareLog() {
+        try {
+            if (logFile == null || !logFile.exists()) {
+                Toast.makeText(this, "Няма лог файл", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            android.net.Uri uri = androidx.core.content.FileProvider.getUriForFile(
+                this, getPackageName() + ".provider", logFile);
+            Intent intent = new Intent(Intent.ACTION_SEND);
+            intent.setType("text/plain");
+            intent.putExtra(Intent.EXTRA_STREAM, uri);
+            intent.putExtra(Intent.EXTRA_SUBJECT, "KEZ GPS Debug Log");
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(intent, "Изпрати лог"));
+        } catch (Exception e) {
+            Toast.makeText(this, "Грешка: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+
 }
