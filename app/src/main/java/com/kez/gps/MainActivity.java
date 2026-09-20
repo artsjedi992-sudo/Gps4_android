@@ -99,18 +99,18 @@ public class MainActivity extends AppCompatActivity {
 
         itnInput.setHintTextColor(Color.parseColor("#888888"));
 
-        findViewById(R.id.search_btn).setOnClickListener(v -> search());
-        findViewById(R.id.mic_btn).setOnClickListener(v -> startVoice());
-        findViewById(R.id.btn_load).setOnClickListener(v -> pickExcelFile());
+        findViewById(R.id.search_btn).setOnClickListener(v -> { log("Бутон: ПОКАЖИ"); search(); });
+        findViewById(R.id.mic_btn).setOnClickListener(v -> { log("Бутон: МИКРОФОН"); startVoice(); });
+        findViewById(R.id.btn_load).setOnClickListener(v -> { log("Бутон: ЗАРЕДИ EXCEL"); pickExcelFile(); });
         findViewById(R.id.btn_load).setOnLongClickListener(v -> { shareLog(); return true; });
-        findViewById(R.id.btn_gmaps).setOnClickListener(v -> openGoogleMaps());
-        findViewById(R.id.btn_close).setOnClickListener(v -> resultsPanel.setVisibility(View.GONE));
-        btnMap.setOnClickListener(v -> setMapType(false));
-        btnSat.setOnClickListener(v -> setMapType(true));
+        findViewById(R.id.btn_gmaps).setOnClickListener(v -> { log("Бутон: GOOGLE MAPS"); openGoogleMaps(); });
+        findViewById(R.id.btn_close).setOnClickListener(v -> { log("Бутон: ЗАТВОРИ ПАНЕЛ"); resultsPanel.setVisibility(View.GONE); });
+        btnMap.setOnClickListener(v -> { log("Бутон: КАРТА"); setMapType(false); });
+        btnSat.setOnClickListener(v -> { log("Бутон: САТЕЛИТ"); setMapType(true); });
 
         resultsList.setLayoutManager(new LinearLayoutManager(this));
 
-        itnInput.setOnEditorActionListener((v, actionId, event) -> { search(); return true; });
+        itnInput.setOnEditorActionListener((v, actionId, event) -> { log("Enter: " + itnInput.getText().toString()); search(); return true; });
 
         requestPermissions();
 
@@ -118,6 +118,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setupMap() {
+        log("setupMap() старт");
         map.setTileSource(TileSourceFactory.MAPNIK);
         map.setMultiTouchControls(true);
         map.getController().setZoom(11.0);
@@ -500,6 +501,7 @@ public class MainActivity extends AppCompatActivity {
 
         for (int i = 0; i < toShow.size(); i++) {
             GpsRecord rec = toShow.get(i);
+            log("Маркер " + (i+1) + ": ИТН=" + rec.itn + " lat=" + rec.lat + " lon=" + rec.lon);
             GeoPoint point = new GeoPoint(rec.lat, rec.lon);
             points.add(point);
 
@@ -532,7 +534,8 @@ public class MainActivity extends AppCompatActivity {
             routeLine.getOutlinePaint().setStrokeWidth(5f);
             map.getOverlays().add(routeLine);
             final org.osmdroid.util.BoundingBox bb = org.osmdroid.util.BoundingBox.fromGeoPoints(points);
-            map.post(() -> map.zoomToBoundingBox(bb, false, 150));
+            log("zoomToBoundingBox старт");
+            map.post(() -> { log("zoomToBoundingBox изпълнен"); map.zoomToBoundingBox(bb, false, 150); });
         } else if (points.size() == 1) {
             map.getController().animateTo(points.get(0));
             map.getController().setZoom(16.0);
@@ -615,6 +618,7 @@ public class MainActivity extends AppCompatActivity {
                 String spoken = results.get(0);
                 String digits = spoken.replaceAll("[^0-9 ]", "").trim();
                 itnInput.setText(digits.isEmpty() ? spoken : digits);
+                log("Глас разпознат: " + spoken + " -> " + (digits.isEmpty() ? spoken : digits));
                 search();
             }
         }
@@ -766,7 +770,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
-    public void onResume() { super.onResume(); map.onResume(); }
+    public void onResume() { super.onResume(); map.onResume(); log("onResume()"); }
 
     @Override
     public void onPause() { super.onPause(); map.onPause(); }
@@ -775,29 +779,50 @@ public class MainActivity extends AppCompatActivity {
     private java.io.File logFile;
     private void initLog() {
         try {
-            logFile = new java.io.File(getExternalFilesDir(null), "kez_debug.txt");
-            log("=== СТАРТ НА ПРИЛОЖЕНИЕТО ===");
-        } catch (Exception e) { logFile = null; }
+            // Използвай вътрешна памет - винаги достъпна
+            logFile = new java.io.File(getFilesDir(), "kez_debug.txt");
+            // Изчисти стария лог при старт
+            if (logFile.exists()) logFile.delete();
+            log("=== СТАРТ " + new java.util.Date().toString() + " ===");
+            log("Android: " + android.os.Build.VERSION.RELEASE);
+            log("Устройство: " + android.os.Build.MODEL);
+            log("Лог файл: " + logFile.getAbsolutePath());
+        } catch (Exception e) {
+            android.util.Log.e("KEZ_GPS", "initLog грешка: " + e.getMessage());
+        }
     }
-    private void log(String msg) {
+
+    private synchronized void log(String msg) {
         try {
-            if (logFile == null) return;
             String line = new java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.getDefault())
                 .format(new java.util.Date()) + " " + msg + "\n";
-            java.io.FileWriter fw = new java.io.FileWriter(logFile, true);
-            fw.write(line);
-            fw.close();
             android.util.Log.d("KEZ_GPS", msg);
-        } catch (Exception e) { /* ignore */ }
+            if (logFile == null) return;
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(logFile, true);
+            fos.write(line.getBytes("UTF-8"));
+            fos.flush();
+            fos.close();
+        } catch (Exception e) {
+            android.util.Log.e("KEZ_GPS", "log грешка: " + e.getMessage());
+        }
     }
+
     private void shareLog() {
         try {
             if (logFile == null || !logFile.exists()) {
-                Toast.makeText(this, "Няма лог файл", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Няма лог: " + (logFile != null ? logFile.getAbsolutePath() : "null"), Toast.LENGTH_LONG).show();
                 return;
             }
+            // Копирай в cache за споделяне
+            java.io.File shareFile = new java.io.File(getCacheDir(), "kez_debug_share.txt");
+            java.io.FileInputStream fis = new java.io.FileInputStream(logFile);
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(shareFile);
+            byte[] buf = new byte[4096]; int n;
+            while ((n = fis.read(buf)) != -1) fos.write(buf, 0, n);
+            fis.close(); fos.close();
+
             android.net.Uri uri = androidx.core.content.FileProvider.getUriForFile(
-                this, getPackageName() + ".provider", logFile);
+                this, getPackageName() + ".provider", shareFile);
             Intent intent = new Intent(Intent.ACTION_SEND);
             intent.setType("text/plain");
             intent.putExtra(Intent.EXTRA_STREAM, uri);
@@ -805,7 +830,7 @@ public class MainActivity extends AppCompatActivity {
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             startActivity(Intent.createChooser(intent, "Изпрати лог"));
         } catch (Exception e) {
-            Toast.makeText(this, "Грешка: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "shareLog грешка: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
 
