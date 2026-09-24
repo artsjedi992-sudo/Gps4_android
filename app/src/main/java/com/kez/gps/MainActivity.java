@@ -10,11 +10,14 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
 import android.speech.RecognizerIntent;
+import android.view.Gravity;
+import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -38,6 +41,7 @@ import java.io.FileInputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -76,8 +80,12 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
         Configuration.getInstance().setUserAgentValue(getPackageName());
+
         setContentView(R.layout.activity_main);
+
+        initLog();
 
         map = findViewById(R.id.map);
         itnInput = findViewById(R.id.itn_input);
@@ -90,42 +98,53 @@ public class MainActivity extends AppCompatActivity {
         btnSat = findViewById(R.id.btn_sat);
 
         setupMap();
+
         itnInput.setHintTextColor(Color.parseColor("#888888"));
 
-        findViewById(R.id.search_btn).setOnClickListener(v -> search());
-        findViewById(R.id.mic_btn).setOnClickListener(v -> startVoice());
-        findViewById(R.id.btn_load).setOnClickListener(v -> pickExcelFile());
-        findViewById(R.id.btn_gmaps).setOnClickListener(v -> openGoogleMaps());
-        findViewById(R.id.btn_close).setOnClickListener(v -> resultsPanel.setVisibility(View.GONE));
-        
-        btnMap.setOnClickListener(v -> setMapType(false));
-        btnSat.setOnClickListener(v -> setMapType(true));
+        findViewById(R.id.search_btn).setOnClickListener(v -> { log("Бутон: ПОКАЖИ"); search(); });
+        findViewById(R.id.mic_btn).setOnClickListener(v -> { log("Бутон: МИКРОФОН"); startVoice(); });
+        findViewById(R.id.btn_load).setOnClickListener(v -> { log("Бутон: ЗАРЕДИ EXCEL"); pickExcelFile(); });
+        findViewById(R.id.btn_load).setOnLongClickListener(v -> { shareLog(); return true; });
+        findViewById(R.id.btn_gmaps).setOnClickListener(v -> { log("Бутон: GOOGLE MAPS"); openGoogleMaps(); });
+        findViewById(R.id.btn_close).setOnClickListener(v -> { log("Бутон: ЗАТВОРИ ПАНЕЛ"); resultsPanel.setVisibility(View.GONE); });
+        btnMap.setOnClickListener(v -> { log("Бутон: КАРТА"); setMapType(false); });
+        btnSat.setOnClickListener(v -> { log("Бутон: САТЕЛИТ"); setMapType(true); });
 
         resultsList.setLayoutManager(new LinearLayoutManager(this));
-        itnInput.setOnEditorActionListener((v, actionId, event) -> { search(); return true; });
+
+        itnInput.setOnEditorActionListener((v, actionId, event) -> { log("Enter: " + itnInput.getText().toString()); search(); return true; });
 
         requestPermissions();
+
         autoLoadExcel();
     }
 
     private void setupMap() {
+        log("setupMap() старт");
         map.setTileSource(TileSourceFactory.MAPNIK);
         map.setMultiTouchControls(true);
         map.getController().setZoom(11.0);
-        map.getController().setCenter(new GeoPoint(42.64, 24.85)); // Карлово
+        map.getController().setCenter(new GeoPoint(42.64, 24.85));
     }
 
     private void setMapType(boolean satellite) {
+        log("setMapType: satellite=" + satellite);
         usingSatellite = satellite;
         if (satellite) {
-            // ПОПРАВКА: Използваме Esri World Imagery, който е безплатен и не се блокира от Google
+            // Esri World Imagery
             org.osmdroid.tileprovider.tilesource.XYTileSource esriSat =
                 new org.osmdroid.tileprovider.tilesource.XYTileSource(
-                    "Esri-Sat",
-                    0, 19, 256, ".png",
-                    new String[]{"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"}
+                    "Esri.WorldImagery",
+                    0, 19, 256, ".jpg",
+                    new String[]{
+                        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                    },
+                    "Esri"
                 );
+            log("Tile source: ESRI сателит");
             map.setTileSource(esriSat);
+            map.invalidate();
+            Toast.makeText(this, "Сателит: ESRI зареден", Toast.LENGTH_SHORT).show();
             btnSat.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.parseColor("#e94560")));
             btnSat.setTextColor(Color.WHITE);
             btnMap.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.parseColor("#0f3460")));
@@ -160,6 +179,7 @@ public class MainActivity extends AppCompatActivity {
             new File(Environment.getExternalStorageDirectory(), "GPS"),
             new File(Environment.getExternalStorageDirectory(), "KEZ"),
         };
+
         for (File dir : searchDirs) {
             if (dir == null || !dir.exists()) continue;
             for (String name : EXCEL_NAMES) {
@@ -196,8 +216,9 @@ public class MainActivity extends AppCompatActivity {
             while ((len = is.read(buf)) != -1) fos.write(buf, 0, len);
             fos.close();
             is.close();
+
             runOnUiThread(() -> loadingText.setText("Анализиране..."));
-            
+
             boolean isXlsx = isXlsxFormat(tmpFile);
             if (isXlsx) {
                 loadXlsxLightweight(tmpFile, filename);
@@ -218,11 +239,14 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) { return false; }
     }
 
+    private Map<Integer, String> sharedStrings = new HashMap<>();
+    
     private void loadXlsxLightweight(File file, String filename) throws Exception {
         java.util.zip.ZipFile zip = new java.util.zip.ZipFile(file);
         try {
-            runOnUiThread(() -> loadingText.setText("Зареждане на стрингове..."));
-            loadSharedStrings(zip);
+            runOnUiThread(() -> loadingText.setText("Четене на данните..."));
+            
+            loadSharedStringsMap(zip);
             
             java.util.zip.ZipEntry sheetEntry = zip.getEntry("xl/worksheets/sheet1.xml");
             if (sheetEntry == null) {
@@ -237,78 +261,52 @@ public class MainActivity extends AppCompatActivity {
             }
             if (sheetEntry == null) throw new Exception("Не намирам лист в Excel файла");
             
-            runOnUiThread(() -> loadingText.setText("Четене на данните..."));
             InputStream sheetStream = zip.getInputStream(sheetEntry);
             LightSheetHandler handler = new LightSheetHandler(filename);
             javax.xml.parsers.SAXParserFactory factory = javax.xml.parsers.SAXParserFactory.newInstance();
-            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", false);
             javax.xml.parsers.SAXParser parser = factory.newSAXParser();
             parser.parse(sheetStream, handler);
             sheetStream.close();
         } finally {
             zip.close();
+            sharedStrings.clear();
         }
     }
 
-    private android.database.sqlite.SQLiteDatabase ssDb = null;
-    private File ssDbFile = null;
-
-    private void openSsDb() throws Exception {
-        ssDbFile = new File(getCacheDir(), "kez_ss_" + System.currentTimeMillis() + ".db");
-        ssDbFile.getParentFile().mkdirs();
-        ssDb = android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(ssDbFile.getAbsolutePath(), null);
-        ssDb.execSQL("CREATE TABLE IF NOT EXISTS ss (i INTEGER PRIMARY KEY, v TEXT)");
-        ssDb.execSQL("PRAGMA synchronous=OFF");
-        ssDb.execSQL("PRAGMA journal_mode=MEMORY");
-        ssDb.execSQL("PRAGMA cache_size=1000");
-    }
-
-    private void closeSsDb() {
-        try { if (ssDb != null) ssDb.close(); } catch (Exception e) {}
-        try { if (ssDbFile != null) ssDbFile.delete(); } catch (Exception e) {}
-        ssDb = null; ssDbFile = null;
-    }
-
-    private String getSs(int idx) {
-        if (ssDb == null || !ssDb.isOpen()) return "";
-        try (android.database.Cursor c = ssDb.rawQuery("SELECT v FROM ss WHERE i=?", new String[]{String.valueOf(idx)})) {
-            return c.moveToFirst() ? c.getString(0) : "";
-        }
-    }
-
-    private List<String> loadSharedStrings(java.util.zip.ZipFile zip) throws Exception {
+    private void loadSharedStringsMap(java.util.zip.ZipFile zip) throws Exception {
         java.util.zip.ZipEntry entry = zip.getEntry("xl/sharedStrings.xml");
-        if (entry == null) return new ArrayList<>();
-        openSsDb();
+        if (entry == null) return;
+
         InputStream is = zip.getInputStream(entry);
         javax.xml.parsers.SAXParserFactory factory = javax.xml.parsers.SAXParserFactory.newInstance();
         javax.xml.parsers.SAXParser parser = factory.newSAXParser();
         final int[] idx = {0};
-        ssDb.beginTransaction();
-        try {
-            parser.parse(is, new org.xml.sax.helpers.DefaultHandler() {
-                boolean inT = false;
-                final StringBuilder sb = new StringBuilder();
-                final android.content.ContentValues cv = new android.content.ContentValues();
-                @Override public void startElement(String u, String l, String n, org.xml.sax.Attributes a) {
-                    if ("t".equals(n)) { inT = true; sb.setLength(0); }
-                    else if ("si".equals(n)) sb.setLength(0);
-                }
-                @Override public void characters(char[] ch, int s, int len) {
-                    if (inT) sb.append(ch, s, len);
-                }
-                @Override public void endElement(String u, String l, String n) {
-                    if ("t".equals(n)) inT = false;
-                    else if ("si".equals(n)) {
-                        cv.put("i", idx[0]++); cv.put("v", sb.toString());
-                        ssDb.insert("ss", null, cv);
+
+        parser.parse(is, new org.xml.sax.helpers.DefaultHandler() {
+            boolean inT = false;
+            final StringBuilder sb = new StringBuilder();
+            
+            @Override public void startElement(String u, String l, String n, org.xml.sax.Attributes a) {
+                if ("t".equals(n)) { inT=true; sb.setLength(0); }
+                else if ("si".equals(n)) sb.setLength(0);
+            }
+            
+            @Override public void characters(char[] ch, int s, int len) {
+                if (inT) sb.append(ch, s, len);
+            }
+            
+            @Override public void endElement(String u, String l, String n) {
+                if ("t".equals(n)) inT=false;
+                else if ("si".equals(n)) {
+                    sharedStrings.put(idx[0]++, sb.toString());
+                    if (idx[0] % 10000 == 0) {
+                        final int count = idx[0];
+                        runOnUiThread(() -> loadingText.setText("Стрингове: " + count + "..."));
                     }
                 }
-            });
-            ssDb.setTransactionSuccessful();
-        } finally { ssDb.endTransaction(); }
+            }
+        });
         is.close();
-        return null;
     }
 
     class LightSheetHandler extends org.xml.sax.helpers.DefaultHandler {
@@ -324,7 +322,9 @@ public class MainActivity extends AppCompatActivity {
         private int colIdx = 0;
         private final Map<String, GpsRecord> data = new HashMap<>();
 
-        LightSheetHandler(String filename) { this.filename = filename; }
+        LightSheetHandler(String filename) {
+            this.filename = filename;
+        }
 
         private int colLetterToIndex(String ref) {
             int col = 0;
@@ -359,7 +359,10 @@ public class MainActivity extends AppCompatActivity {
                 inV = false;
                 String v = val.toString();
                 if (isStr) {
-                    try { v = getSs(Integer.parseInt(v)); } catch (Exception e) { v = ""; }
+                    try { 
+                        v = sharedStrings.getOrDefault(Integer.parseInt(v), ""); 
+                    }
+                    catch (Exception e) { v = ""; }
                 }
                 while (curRow.size() <= colIdx) curRow.add("");
                 curRow.set(colIdx, v);
@@ -371,6 +374,7 @@ public class MainActivity extends AppCompatActivity {
 
         private void processRow() {
             if (curRow.isEmpty()) return;
+
             if (headerRow < 0) {
                 for (int c = 0; c < curRow.size(); c++) {
                     if ("ИТН".equalsIgnoreCase(curRow.get(c).trim())) {
@@ -378,81 +382,76 @@ public class MainActivity extends AppCompatActivity {
                         headers = new ArrayList<>(curRow);
                         for (int i = 0; i < headers.size(); i++) {
                             String h = headers.get(i).trim().toUpperCase();
-                            if ((h.equals("X") || h.equals("LAT") || h.equals("LATITUDE")) && colLat < 0) colLat = i;
-                            if ((h.equals("Y") || h.equals("LON") || h.equals("LNG") || h.equals("LONGITUDE")) && colLon < 0) colLon = i;
+                            if ((h.equals("X")||h.equals("LAT")||h.equals("LATITUDE")) && colLat<0) colLat=i;
+                            if ((h.equals("Y")||h.equals("LON")||h.equals("LNG")||h.equals("LONGITUDE")) && colLon<0) colLon=i;
                         }
-                        latCnt = new int[Math.max(100, headers.size() + 10)];
-                        lonCnt = new int[Math.max(100, headers.size() + 10)];
+                        latCnt = new int[Math.max(100, headers.size()+10)];
+                        lonCnt = new int[Math.max(100, headers.size()+10)];
                         return;
                     }
                 }
                 return;
             }
-            if ((colLat < 0 || colLon < 0) && scanRows < 10) {
-                for (int c = 0; c < curRow.size() && c < latCnt.length; c++) {
+
+            if ((colLat<0||colLon<0) && scanRows<10) {
+                for (int c=0; c<curRow.size() && c<latCnt.length; c++) {
                     try {
-                        double v = Double.parseDouble(curRow.get(c).replace(",", "."));
-                        if (v >= 41.5 && v <= 44.5 && v != Math.floor(v)) latCnt[c]++;
-                        if (v >= 22.0 && v <= 28.5 && v != Math.floor(v)) lonCnt[c]++;
+                        double v = Double.parseDouble(curRow.get(c).replace(",","."));
+                        if (v>=41.5&&v<=44.5&&v!=Math.floor(v)) latCnt[c]++;
+                        if (v>=22.0&&v<=28.5&&v!=Math.floor(v)) lonCnt[c]++;
                     } catch (Exception ignored) {}
                 }
-                if (++scanRows == 10) {
-                    if (colLat < 0) { int mx = 0; for (int c = 0; c < latCnt.length; c++) if (latCnt[c] > mx) { mx = latCnt[c]; colLat = c; } }
-                    if (colLon < 0) { int mx = 0; for (int c = 0; c < lonCnt.length; c++) if (lonCnt[c] > mx && c != colLat) { mx = lonCnt[c]; colLon = c; } }
+                if (++scanRows==10) {
+                    if (colLat<0) { int mx=0; for(int c=0;c<latCnt.length;c++) if(latCnt[c]>mx){mx=latCnt[c];colLat=c;} }
+                    if (colLon<0) { int mx=0; for(int c=0;c<lonCnt.length;c++) if(lonCnt[c]>mx&&c!=colLat){mx=lonCnt[c];colLon=c;} }
                 }
             }
-            if (colITN < 0 || colLat < 0 || colLon < 0) return;
-            
-            // ПОПРАВКА: Правилно обработване на Excel числа (напр. "12345.0" -> "12345")
-            String rawItn = colITN < curRow.size() ? curRow.get(colITN).trim() : "";
-            if (rawItn.matches("\\d+\\.0+")) {
-                rawItn = rawItn.replaceAll("\\.0+$", "");
-            }
-            String itn = rawItn.replaceAll("[^0-9]", "");
-            
-            if (itn.isEmpty() || itn.equals("0")) return;
+
+            if (colITN<0||colLat<0||colLon<0) return;
+
+            String itn = colITN<curRow.size() ? curRow.get(colITN).trim().replaceAll("[^0-9]","") : "";
+            if (itn.isEmpty()||itn.equals("0")) return;
             try {
-                double lat = Double.parseDouble(colLat < curRow.size() ? curRow.get(colLat).replace(",", ".") : "0");
-                double lon = Double.parseDouble(colLon < curRow.size() ? curRow.get(colLon).replace(",", ".") : "0");
-                if (lat == 0 || lon == 0) return;
-                
-                Map<String, String> extra = new HashMap<>();
-                List<String> skip = java.util.Arrays.asList("X.1", "Y.1", "MAPS", "MAPS.1", "РАЗЛИКА В МЕТРИ");
-                for (int c = 0; c < headers.size() && c < curRow.size(); c++) {
-                    if (c == colITN || c == colLat || c == colLon) continue;
-                    String h = headers.get(c).trim();
-                    if (h.isEmpty() || skip.contains(h.toUpperCase())) continue;
-                    String v = curRow.get(c).trim();
-                    if (!v.isEmpty() && !v.equals("0") && !v.equals(".")) extra.put(h, v);
+                double lat = Double.parseDouble(colLat<curRow.size()?curRow.get(colLat).replace(",","."):"0");
+                double lon = Double.parseDouble(colLon<curRow.size()?curRow.get(colLon).replace(",","."):"0");
+                if (lat==0||lon==0) return;
+                Map<String,String> extra = new HashMap<>();
+                List<String> skip = java.util.Arrays.asList("X.1","Y.1","MAPS","MAPS.1","РАЗЛИКА В МЕТРИ");
+                for (int c=0;c<headers.size()&&c<curRow.size();c++) {
+                    if (c==colITN||c==colLat||c==colLon) continue;
+                    String h=headers.get(c).trim();
+                    if (h.isEmpty()||skip.contains(h.toUpperCase())) continue;
+                    String v=curRow.get(c).trim();
+                    if (!v.isEmpty()&&!v.equals("0")&&!v.equals(".")) extra.put(h,v);
                 }
-                data.put(itn, new GpsRecord(itn, lat, lon, extra));
-                if (data.size() % 5000 == 0) {
-                    final int n = data.size();
-                    runOnUiThread(() -> loadingText.setText("Заредени: " + n + " записа..."));
+                data.put(itn, new GpsRecord(itn,lat,lon,extra));
+                if (data.size()%5000==0) {
+                    final int n=data.size();
+                    runOnUiThread(()->loadingText.setText("Заредени: "+n+" записа..."));
                 }
             } catch (Exception ignored) {}
         }
 
         @Override
         public void endDocument() {
-            closeSsDb();
-            final Map<String, GpsRecord> result = data;
+            final Map<String,GpsRecord> result = data;
             final String fname = filename;
             runOnUiThread(() -> {
-                if (colLat < 0 || colLon < 0) {
+                if (colLat<0||colLon<0) {
                     hideLoading();
-                    Toast.makeText(MainActivity.this, "Не намирам координатни колони!", Toast.LENGTH_LONG).show();
+                    Toast.makeText(MainActivity.this,"Не намирам координатни колони!",Toast.LENGTH_LONG).show();
                     return;
                 }
                 gpsData = result;
                 hideLoading();
-                statusText.setText(fname + ": " + String.format("%,d", result.size()) + " записа");
-                Toast.makeText(MainActivity.this, "Заредени " + result.size() + " клиента!", Toast.LENGTH_SHORT).show();
+                statusText.setText(fname+": "+String.format("%,d",result.size())+" записа");
+                Toast.makeText(MainActivity.this,"Заредени "+result.size()+" клиента!",Toast.LENGTH_SHORT).show();
             });
         }
     }
 
     private void search() {
+        log("search() старт");
         String raw = itnInput.getText().toString().trim();
         if (raw.isEmpty()) {
             Toast.makeText(this, "Въведи ИТН номер!", Toast.LENGTH_SHORT).show();
@@ -463,15 +462,14 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        // ПОПРАВКА: По-добро разделяне, включително \r за Windows copy-paste от Excel
-        String[] parts = raw.split("[\\s,;\\n\\r]+");
+        String[] parts = raw.split("[\\s,;.\\n\\/\\-]+");
+        log("Търся в " + gpsData.size() + " записа");
         foundRecords.clear();
         List<String> notFound = new ArrayList<>();
 
         for (String part : parts) {
             String itn = part.trim().replaceAll("[^0-9]", "");
             if (itn.isEmpty()) continue;
-            
             GpsRecord rec = gpsData.get(itn);
             if (rec != null) {
                 foundRecords.add(rec);
@@ -480,54 +478,82 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
+        log("Намерени: " + foundRecords.size() + " | Ненамерени: " + notFound.size());
+        if (foundRecords.isEmpty()) {
+            Toast.makeText(this, "Не намерени ИТН номера!", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        log("clearMarkers()");
         clearMarkers();
 
+        // Всичко в един runOnUiThread - прост и надежден подход
+        final List<GpsRecord> toShow = new ArrayList<>(foundRecords);
+        final List<String> nf = new ArrayList<>(notFound);
+
+        int[] colors = {
+            Color.parseColor("#e94560"), Color.parseColor("#4CAF50"),
+            Color.parseColor("#2196F3"), Color.parseColor("#FF9800"),
+            Color.parseColor("#9C27B0"), Color.parseColor("#00BCD4")
+        };
+
+        // Подготви всички bitmap-и предварително (може в UI нишката - са малки)
+        log("Почвам рисуване на " + toShow.size() + " маркера");
         List<GeoPoint> points = new ArrayList<>();
-        for (int i = 0; i < foundRecords.size(); i++) {
-            GpsRecord rec = foundRecords.get(i);
+
+        for (int i = 0; i < toShow.size(); i++) {
+            GpsRecord rec = toShow.get(i);
+            log("Маркер " + (i+1) + ": ИТН=" + rec.itn + " lat=" + rec.lat + " lon=" + rec.lon);
             GeoPoint point = new GeoPoint(rec.lat, rec.lon);
             points.add(point);
-            
+
+            android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(60, 60, android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas cv = new android.graphics.Canvas(bmp);
+            android.graphics.Paint pt = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+            pt.setColor(colors[i % colors.length]);
+            cv.drawCircle(30, 30, 28, pt);
+            pt.setColor(Color.WHITE);
+            pt.setTextSize(22f);
+            pt.setTextAlign(android.graphics.Paint.Align.CENTER);
+            pt.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            cv.drawText(String.valueOf(i + 1), 30, 38, pt);
+
             Marker marker = new Marker(map);
             marker.setPosition(point);
             marker.setTitle("ИТН: " + rec.itn);
             marker.setSnippet(rec.getClient() + "\n" + rec.getPlace());
             marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM);
+            marker.setIcon(new android.graphics.drawable.BitmapDrawable(getResources(), bmp));
             map.getOverlays().add(marker);
             markers.add(marker);
         }
 
-        // ПОПРАВКА: Подобрено центриране за множество точки
+        // Линия и zoom
         if (points.size() > 1) {
             routeLine = new Polyline();
             routeLine.setPoints(points);
             routeLine.getOutlinePaint().setColor(Color.parseColor("#e94560"));
-            routeLine.getOutlinePaint().setStrokeWidth(6f);
+            routeLine.getOutlinePaint().setStrokeWidth(5f);
             map.getOverlays().add(routeLine);
-            
-            org.osmdroid.util.BoundingBox bb = org.osmdroid.util.BoundingBox.fromGeoPoints(points);
-            map.zoomToBoundingBox(bb, true); // Без фиксиран padding, за да работи надеждно
+            final org.osmdroid.util.BoundingBox bb = org.osmdroid.util.BoundingBox.fromGeoPoints(points);
+            log("zoomToBoundingBox старт");
+            map.post(() -> { log("zoomToBoundingBox изпълнен"); map.zoomToBoundingBox(bb, false, 150); });
         } else if (points.size() == 1) {
             map.getController().animateTo(points.get(0));
             map.getController().setZoom(16.0);
         }
+        log("map.invalidate()");
         map.invalidate();
 
-        if (!foundRecords.isEmpty()) {
-            ResultAdapter adapter = new ResultAdapter(foundRecords);
-            resultsList.setAdapter(adapter);
-            resultsPanel.setVisibility(View.VISIBLE);
-        }
+        resultsList.setAdapter(new ResultAdapter(toShow));
+        resultsPanel.setVisibility(View.VISIBLE);
 
-        String msg = "Намерени: " + foundRecords.size();
-        if (!notFound.isEmpty()) {
-            msg += " | Ненамерени: " + String.join(", ", notFound);
-        }
+        String msg = "Намерени: " + toShow.size();
+        if (!nf.isEmpty()) msg += " | Ненамерени: " + nf.size();
+        msg += " | Маркери: " + markers.size();
         statusText.setText(msg);
-
-        if (foundRecords.isEmpty()) {
-            Toast.makeText(this, "Няма намерени съвпадения за: " + String.join(", ", notFound), Toast.LENGTH_LONG).show();
-        }
+        log("search() завършено. Маркери: " + markers.size());
+        Toast.makeText(this, "Готово: " + toShow.size() + " точки нанесени", Toast.LENGTH_SHORT).show();
     }
 
     private void clearMarkers() {
@@ -566,8 +592,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startVoice() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.RECORD_AUDIO}, PERM_REQUEST);
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this,
+                new String[]{Manifest.permission.RECORD_AUDIO}, PERM_REQUEST);
             return;
         }
         Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
@@ -585,15 +613,18 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+
         if (requestCode == SPEECH_REQUEST && resultCode == Activity.RESULT_OK && data != null) {
             ArrayList<String> results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
             if (results != null && !results.isEmpty()) {
                 String spoken = results.get(0);
                 String digits = spoken.replaceAll("[^0-9 ]", "").trim();
                 itnInput.setText(digits.isEmpty() ? spoken : digits);
+                log("Глас разпознат: " + spoken + " -> " + (digits.isEmpty() ? spoken : digits));
                 search();
             }
         }
+
         if (requestCode == FILE_REQUEST && resultCode == Activity.RESULT_OK && data != null) {
             Uri uri = data.getData();
             if (uri != null) {
@@ -617,10 +648,10 @@ public class MainActivity extends AppCompatActivity {
 
     private void requestPermissions() {
         List<String> perms = new ArrayList<>();
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) 
-            perms.add(Manifest.permission.RECORD_AUDIO);
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) 
-            perms.add(Manifest.permission.READ_EXTERNAL_STORAGE);
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) perms.add(Manifest.permission.RECORD_AUDIO);
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) perms.add(Manifest.permission.READ_EXTERNAL_STORAGE);
         if (!perms.isEmpty())
             ActivityCompat.requestPermissions(this, perms.toArray(new String[0]), PERM_REQUEST);
     }
@@ -638,18 +669,17 @@ public class MainActivity extends AppCompatActivity {
         String itn;
         double lat, lon;
         Map<String, String> extra;
-        
+
         GpsRecord(String itn, double lat, double lon, Map<String, String> extra) {
             this.itn = itn; this.lat = lat; this.lon = lon; this.extra = extra;
         }
-        
+
         String getClient() {
-            if (extra.containsKey("Клиент име")) return extra.get("Клиент име");
             if (extra.containsKey("Клиент ime")) return extra.get("Клиент ime");
             if (extra.containsKey("Клиент")) return extra.get("Клиент");
             return "";
         }
-        
+
         String getPlace() {
             if (extra.containsKey("Нас място")) return extra.get("Нас място");
             if (extra.containsKey("Нас. място")) return extra.get("Нас. място");
@@ -660,32 +690,34 @@ public class MainActivity extends AppCompatActivity {
     class ResultAdapter extends RecyclerView.Adapter<ResultAdapter.VH> {
         List<GpsRecord> items;
         boolean[] expanded;
-        
+
         ResultAdapter(List<GpsRecord> items) {
             this.items = items;
             this.expanded = new boolean[items.size()];
         }
-        
+
         @NonNull @Override
         public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-            View v = getLayoutInflater().inflate(R.layout.item_result, parent, false);
+            View v = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_result, parent, false);
             return new VH(v);
         }
-        
+
         @Override
         public void onBindViewHolder(@NonNull VH h, @SuppressLint("RecyclerView") int pos) {
             GpsRecord rec = items.get(pos);
             h.itnText.setText((pos + 1) + ". ИТН " + rec.itn);
+
             String client = rec.getClient();
             String place = rec.getPlace();
             h.clientText.setText(client.isEmpty() ? rec.itn : client);
             h.placeText.setText(place);
             h.placeText.setVisibility(place.isEmpty() ? View.GONE : View.VISIBLE);
-            
+
             h.btnDetails.setOnClickListener(v -> {
                 expanded[pos] = !expanded[pos];
                 h.detailsLayout.setVisibility(expanded[pos] ? View.VISIBLE : View.GONE);
                 h.btnDetails.setText(expanded[pos] ? "Скрий" : "Детайли");
+
                 if (expanded[pos] && h.detailsLayout.getChildCount() == 0) {
                     h.detailsLayout.removeAllViews();
                     addDetailRow(h.detailsLayout, "ИТН", rec.itn);
@@ -695,33 +727,36 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
             });
-            
+
             h.itemView.setOnClickListener(v -> {
                 map.getController().animateTo(new GeoPoint(rec.lat, rec.lon));
                 map.getController().setZoom(16.0);
             });
         }
-        
+
         void addDetailRow(LinearLayout layout, String label, String value) {
             LinearLayout row = new LinearLayout(MainActivity.this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setPadding(0, 2, 0, 2);
+
             TextView lbl = new TextView(MainActivity.this);
             lbl.setText(label);
             lbl.setTextColor(Color.parseColor("#e94560"));
             lbl.setTextSize(10f);
             lbl.setMinWidth(200);
+
             TextView val = new TextView(MainActivity.this);
             val.setText(value);
             val.setTextColor(Color.parseColor("#dddddd"));
             val.setTextSize(10f);
+
             row.addView(lbl);
             row.addView(val);
             layout.addView(row);
         }
-        
+
         @Override public int getItemCount() { return items.size(); }
-        
+
         class VH extends RecyclerView.ViewHolder {
             TextView itnText, clientText, placeText, btnDetails;
             LinearLayout detailsLayout;
@@ -737,7 +772,78 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
-    public void onResume() { super.onResume(); map.onResume(); }
+    public void onResume() { super.onResume(); map.onResume(); log("onResume()"); }
+
     @Override
     public void onPause() { super.onPause(); map.onPause(); }
+
+    // ── Лог в файл ────────────────────────────────────────────────────
+    private java.io.File logFile;
+    private void initLog() {
+        try {
+            // Опитай всички възможни пътища
+            java.io.File dir = getFilesDir();
+            if (dir == null) dir = getCacheDir();
+            if (dir == null) dir = new java.io.File("/data/data/com.kez.gps");
+            dir.mkdirs();
+            logFile = new java.io.File(dir, "kez_debug.txt");
+            if (logFile.exists()) logFile.delete();
+            logFile.createNewFile();
+            log("=== СТАРТ ===");
+            log("Android: " + android.os.Build.VERSION.RELEASE);
+            log("Устройство: " + android.os.Build.MODEL);
+            log("Лог: " + logFile.getAbsolutePath());
+            log("Съществува: " + logFile.exists());
+            // Покажи пътя на екрана при старт
+            android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+            h.postDelayed(() -> Toast.makeText(this,
+                "Лог: " + logFile.getAbsolutePath(), Toast.LENGTH_LONG).show(), 1500);
+        } catch (Throwable t) {
+            android.util.Log.e("KEZ_GPS", "initLog FATAL: " + t);
+            logFile = null;
+        }
+    }
+
+    private synchronized void log(String msg) {
+        android.util.Log.d("KEZ_GPS", msg);
+        try {
+            if (logFile == null) return;
+            java.io.PrintWriter pw = new java.io.PrintWriter(
+                new java.io.BufferedWriter(new java.io.FileWriter(logFile, true)));
+            pw.println(android.os.SystemClock.elapsedRealtime() + "ms " + msg);
+            pw.flush();
+            pw.close();
+        } catch (Throwable t) {
+            android.util.Log.e("KEZ_GPS", "log ERR: " + t);
+        }
+    }
+
+    private void shareLog() {
+        try {
+            if (logFile == null || !logFile.exists()) {
+                Toast.makeText(this, "Няма лог: " + (logFile != null ? logFile.getAbsolutePath() : "null"), Toast.LENGTH_LONG).show();
+                return;
+            }
+            // Копирай в cache за споделяне
+            java.io.File shareFile = new java.io.File(getCacheDir(), "kez_debug_share.txt");
+            java.io.FileInputStream fis = new java.io.FileInputStream(logFile);
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(shareFile);
+            byte[] buf = new byte[4096]; int n;
+            while ((n = fis.read(buf)) != -1) fos.write(buf, 0, n);
+            fis.close(); fos.close();
+
+            android.net.Uri uri = androidx.core.content.FileProvider.getUriForFile(
+                this, getPackageName() + ".provider", shareFile);
+            Intent intent = new Intent(Intent.ACTION_SEND);
+            intent.setType("text/plain");
+            intent.putExtra(Intent.EXTRA_STREAM, uri);
+            intent.putExtra(Intent.EXTRA_SUBJECT, "KEZ GPS Debug Log");
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(intent, "Изпрати лог"));
+        } catch (Exception e) {
+            Toast.makeText(this, "shareLog грешка: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+
 }
