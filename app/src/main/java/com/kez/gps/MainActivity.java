@@ -85,8 +85,6 @@ public class MainActivity extends AppCompatActivity {
 
         setContentView(R.layout.activity_main);
 
-        initLog();
-
         map = findViewById(R.id.map);
         itnInput = findViewById(R.id.itn_input);
         statusText = findViewById(R.id.status_text);
@@ -101,18 +99,18 @@ public class MainActivity extends AppCompatActivity {
 
         itnInput.setHintTextColor(Color.parseColor("#888888"));
 
-        findViewById(R.id.search_btn).setOnClickListener(v -> { log("Бутон: ПОКАЖИ"); search(); });
-        findViewById(R.id.mic_btn).setOnClickListener(v -> { log("Бутон: МИКРОФОН"); startVoice(); });
-        findViewById(R.id.btn_load).setOnClickListener(v -> { log("Бутон: ЗАРЕДИ EXCEL"); pickExcelFile(); });
-        findViewById(R.id.btn_load).setOnLongClickListener(v -> { shareLog(); return true; });
-        findViewById(R.id.btn_gmaps).setOnClickListener(v -> { log("Бутон: GOOGLE MAPS"); openGoogleMaps(); });
-        findViewById(R.id.btn_close).setOnClickListener(v -> { log("Бутон: ЗАТВОРИ ПАНЕЛ"); resultsPanel.setVisibility(View.GONE); });
-        btnMap.setOnClickListener(v -> { log("Бутон: КАРТА"); setMapType(false); });
-        btnSat.setOnClickListener(v -> { log("Бутон: САТЕЛИТ"); setMapType(true); });
+        findViewById(R.id.search_btn).setOnClickListener(v -> search());
+        findViewById(R.id.mic_btn).setOnClickListener(v -> startVoice());
+        findViewById(R.id.btn_load).setOnClickListener(v -> pickExcelFile());
+        findViewById(R.id.btn_gmaps).setOnClickListener(v -> openGoogleMaps());
+        findViewById(R.id.btn_close).setOnClickListener(v -> resultsPanel.setVisibility(View.GONE));
+        btnMap.setOnClickListener(v -> setMapType(false));
+        btnMap.setOnLongClickListener(v -> { sendLog(); return true; });
+        btnSat.setOnClickListener(v -> setMapType(true));
 
         resultsList.setLayoutManager(new LinearLayoutManager(this));
 
-        itnInput.setOnEditorActionListener((v, actionId, event) -> { log("Enter: " + itnInput.getText().toString()); search(); return true; });
+        itnInput.setOnEditorActionListener((v, actionId, event) -> { search(); return true; });
 
         requestPermissions();
 
@@ -120,7 +118,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setupMap() {
-        log("setupMap() старт");
         map.setTileSource(TileSourceFactory.MAPNIK);
         map.setMultiTouchControls(true);
         map.getController().setZoom(11.0);
@@ -128,23 +125,17 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setMapType(boolean satellite) {
-        log("setMapType: satellite=" + satellite);
+        log("setMapType sat=" + satellite);
         usingSatellite = satellite;
         if (satellite) {
-            // Esri World Imagery
-            org.osmdroid.tileprovider.tilesource.XYTileSource esriSat =
+            org.osmdroid.tileprovider.tilesource.XYTileSource esri =
                 new org.osmdroid.tileprovider.tilesource.XYTileSource(
-                    "Esri.WorldImagery",
+                    "ESRI",
                     0, 19, 256, ".jpg",
-                    new String[]{
-                        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-                    },
+                    new String[]{"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}.jpg"},
                     "Esri"
                 );
-            log("Tile source: ESRI сателит");
-            map.setTileSource(esriSat);
-            map.invalidate();
-            Toast.makeText(this, "Сателит: ESRI зареден", Toast.LENGTH_SHORT).show();
+            map.setTileSource(esri);
             btnSat.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.parseColor("#e94560")));
             btnSat.setTextColor(Color.WHITE);
             btnMap.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.parseColor("#0f3460")));
@@ -451,7 +442,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void search() {
-        log("search() старт");
+        log("search clicked input=" + itnInput.getText().toString());
         String raw = itnInput.getText().toString().trim();
         if (raw.isEmpty()) {
             Toast.makeText(this, "Въведи ИТН номер!", Toast.LENGTH_SHORT).show();
@@ -462,8 +453,8 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        // ФИКСИРАНО: Правилен regex за всички разделители
         String[] parts = raw.split("[\\s,;.\\n\\/\\-]+");
-        log("Търся в " + gpsData.size() + " записа");
         foundRecords.clear();
         List<String> notFound = new ArrayList<>();
 
@@ -478,18 +469,12 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        log("Намерени: " + foundRecords.size() + " | Ненамерени: " + notFound.size());
         if (foundRecords.isEmpty()) {
             Toast.makeText(this, "Не намерени ИТН номера!", Toast.LENGTH_SHORT).show();
             return;
         }
 
-        log("clearMarkers()");
         clearMarkers();
-
-        // Всичко в един runOnUiThread - прост и надежден подход
-        final List<GpsRecord> toShow = new ArrayList<>(foundRecords);
-        final List<String> nf = new ArrayList<>(notFound);
 
         int[] colors = {
             Color.parseColor("#e94560"), Color.parseColor("#4CAF50"),
@@ -497,63 +482,60 @@ public class MainActivity extends AppCompatActivity {
             Color.parseColor("#9C27B0"), Color.parseColor("#00BCD4")
         };
 
-        // Подготви всички bitmap-и предварително (може в UI нишката - са малки)
-        log("Почвам рисуване на " + toShow.size() + " маркера");
         List<GeoPoint> points = new ArrayList<>();
-
-        for (int i = 0; i < toShow.size(); i++) {
-            GpsRecord rec = toShow.get(i);
-            log("Маркер " + (i+1) + ": ИТН=" + rec.itn + " lat=" + rec.lat + " lon=" + rec.lon);
+        for (int i = 0; i < foundRecords.size(); i++) {
+            GpsRecord rec = foundRecords.get(i);
             GeoPoint point = new GeoPoint(rec.lat, rec.lon);
             points.add(point);
-
-            android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(60, 60, android.graphics.Bitmap.Config.ARGB_8888);
-            android.graphics.Canvas cv = new android.graphics.Canvas(bmp);
-            android.graphics.Paint pt = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
-            pt.setColor(colors[i % colors.length]);
-            cv.drawCircle(30, 30, 28, pt);
-            pt.setColor(Color.WHITE);
-            pt.setTextSize(22f);
-            pt.setTextAlign(android.graphics.Paint.Align.CENTER);
-            pt.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-            cv.drawText(String.valueOf(i + 1), 30, 38, pt);
 
             Marker marker = new Marker(map);
             marker.setPosition(point);
             marker.setTitle("ИТН: " + rec.itn);
             marker.setSnippet(rec.getClient() + "\n" + rec.getPlace());
             marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM);
-            marker.setIcon(new android.graphics.drawable.BitmapDrawable(getResources(), bmp));
+            
+            // Номериране A, B, C...
+            android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(56,56,android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas cv = new android.graphics.Canvas(bmp);
+            android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+            int[] cols = {0xFFe94560,0xFF4CAF50,0xFF2196F3,0xFFFF9800,0xFF9C27B0,0xFF00BCD4};
+            p.setColor(cols[i % cols.length]);
+            cv.drawCircle(28,28,26,p);
+            p.setColor(0xFFFFFFFF); p.setTextSize(20f); p.setTextAlign(android.graphics.Paint.Align.CENTER);
+            p.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            cv.drawText(String.valueOf(i+1),28,35,p);
+            marker.setIcon(new android.graphics.drawable.BitmapDrawable(getResources(),bmp));
             map.getOverlays().add(marker);
             markers.add(marker);
         }
 
-        // Линия и zoom
+        // Линия между всички маркери
         if (points.size() > 1) {
             routeLine = new Polyline();
             routeLine.setPoints(points);
             routeLine.getOutlinePaint().setColor(Color.parseColor("#e94560"));
             routeLine.getOutlinePaint().setStrokeWidth(5f);
             map.getOverlays().add(routeLine);
-            final org.osmdroid.util.BoundingBox bb = org.osmdroid.util.BoundingBox.fromGeoPoints(points);
-            log("zoomToBoundingBox старт");
-            map.post(() -> { log("zoomToBoundingBox изпълнен"); map.zoomToBoundingBox(bb, false, 150); });
+
+            org.osmdroid.util.BoundingBox bb = org.osmdroid.util.BoundingBox.fromGeoPoints(points);
+            log("markers=" + markers.size() + " zoom to bbox");
+            map.post(() -> map.zoomToBoundingBox(bb, false, 100));
         } else if (points.size() == 1) {
             map.getController().animateTo(points.get(0));
             map.getController().setZoom(16.0);
         }
-        log("map.invalidate()");
+
         map.invalidate();
 
-        resultsList.setAdapter(new ResultAdapter(toShow));
-        resultsPanel.setVisibility(View.VISIBLE);
+        if (!foundRecords.isEmpty()) {
+            ResultAdapter adapter = new ResultAdapter(foundRecords);
+            resultsList.setAdapter(adapter);
+            resultsPanel.setVisibility(View.VISIBLE);
+        }
 
-        String msg = "Намерени: " + toShow.size();
-        if (!nf.isEmpty()) msg += " | Ненамерени: " + nf.size();
-        msg += " | Маркери: " + markers.size();
+        String msg = "Намерени: " + foundRecords.size();
+        if (!notFound.isEmpty()) msg += " | Ненамерени: " + notFound.size();
         statusText.setText(msg);
-        log("search() завършено. Маркери: " + markers.size());
-        Toast.makeText(this, "Готово: " + toShow.size() + " точки нанесени", Toast.LENGTH_SHORT).show();
     }
 
     private void clearMarkers() {
@@ -620,7 +602,6 @@ public class MainActivity extends AppCompatActivity {
                 String spoken = results.get(0);
                 String digits = spoken.replaceAll("[^0-9 ]", "").trim();
                 itnInput.setText(digits.isEmpty() ? spoken : digits);
-                log("Глас разпознат: " + spoken + " -> " + (digits.isEmpty() ? spoken : digits));
                 search();
             }
         }
@@ -772,78 +753,38 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
-    public void onResume() { super.onResume(); map.onResume(); log("onResume()"); }
+    public void onResume() { super.onResume(); map.onResume(); }
 
     @Override
     public void onPause() { super.onPause(); map.onPause(); }
 
-    // ── Лог в файл ────────────────────────────────────────────────────
-    private java.io.File logFile;
-    private void initLog() {
+    // ── Лог ───────────────────────────────────────
+    private java.io.PrintWriter logWriter;
+
+    private void startLog() {
         try {
-            // Опитай всички възможни пътища
-            java.io.File dir = getFilesDir();
-            if (dir == null) dir = getCacheDir();
-            if (dir == null) dir = new java.io.File("/data/data/com.kez.gps");
-            dir.mkdirs();
-            logFile = new java.io.File(dir, "kez_debug.txt");
-            if (logFile.exists()) logFile.delete();
-            logFile.createNewFile();
-            log("=== СТАРТ ===");
-            log("Android: " + android.os.Build.VERSION.RELEASE);
-            log("Устройство: " + android.os.Build.MODEL);
-            log("Лог: " + logFile.getAbsolutePath());
-            log("Съществува: " + logFile.exists());
-            // Покажи пътя на екрана при старт
-            android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
-            h.postDelayed(() -> Toast.makeText(this,
-                "Лог: " + logFile.getAbsolutePath(), Toast.LENGTH_LONG).show(), 1500);
-        } catch (Throwable t) {
-            android.util.Log.e("KEZ_GPS", "initLog FATAL: " + t);
-            logFile = null;
-        }
+            java.io.File f = new java.io.File(getFilesDir(), "log.txt");
+            logWriter = new java.io.PrintWriter(new java.io.FileWriter(f, false));
+            log("START android=" + android.os.Build.VERSION.RELEASE + " device=" + android.os.Build.MODEL);
+        } catch (Exception e) { logWriter = null; }
     }
 
-    private synchronized void log(String msg) {
-        android.util.Log.d("KEZ_GPS", msg);
-        try {
-            if (logFile == null) return;
-            java.io.PrintWriter pw = new java.io.PrintWriter(
-                new java.io.BufferedWriter(new java.io.FileWriter(logFile, true)));
-            pw.println(android.os.SystemClock.elapsedRealtime() + "ms " + msg);
-            pw.flush();
-            pw.close();
-        } catch (Throwable t) {
-            android.util.Log.e("KEZ_GPS", "log ERR: " + t);
-        }
+    private void log(String s) {
+        try { if (logWriter != null) { logWriter.println(android.os.SystemClock.elapsedRealtime() + " " + s); logWriter.flush(); } } catch (Exception ignored) {}
+        android.util.Log.d("KEZ", s);
     }
 
-    private void shareLog() {
+    private void sendLog() {
         try {
-            if (logFile == null || !logFile.exists()) {
-                Toast.makeText(this, "Няма лог: " + (logFile != null ? logFile.getAbsolutePath() : "null"), Toast.LENGTH_LONG).show();
-                return;
-            }
-            // Копирай в cache за споделяне
-            java.io.File shareFile = new java.io.File(getCacheDir(), "kez_debug_share.txt");
-            java.io.FileInputStream fis = new java.io.FileInputStream(logFile);
-            java.io.FileOutputStream fos = new java.io.FileOutputStream(shareFile);
-            byte[] buf = new byte[4096]; int n;
-            while ((n = fis.read(buf)) != -1) fos.write(buf, 0, n);
-            fis.close(); fos.close();
-
-            android.net.Uri uri = androidx.core.content.FileProvider.getUriForFile(
-                this, getPackageName() + ".provider", shareFile);
-            Intent intent = new Intent(Intent.ACTION_SEND);
-            intent.setType("text/plain");
-            intent.putExtra(Intent.EXTRA_STREAM, uri);
-            intent.putExtra(Intent.EXTRA_SUBJECT, "KEZ GPS Debug Log");
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            startActivity(Intent.createChooser(intent, "Изпрати лог"));
-        } catch (Exception e) {
-            Toast.makeText(this, "shareLog грешка: " + e.getMessage(), Toast.LENGTH_LONG).show();
-        }
+            if (logWriter != null) logWriter.flush();
+            java.io.File f = new java.io.File(getFilesDir(), "log.txt");
+            if (!f.exists()) { Toast.makeText(this,"Няма лог",Toast.LENGTH_SHORT).show(); return; }
+            android.net.Uri u = androidx.core.content.FileProvider.getUriForFile(this, getPackageName()+".fileprovider", f);
+            Intent i = new Intent(Intent.ACTION_SEND);
+            i.setType("text/plain"); i.putExtra(Intent.EXTRA_STREAM, u);
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(i, "Изпрати лог"));
+        } catch (Exception e) { Toast.makeText(this, ""+e, Toast.LENGTH_LONG).show(); }
     }
-
 
 }
